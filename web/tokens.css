@@ -1,0 +1,139 @@
+/* YoRA Slicer - colour tokens. The only place colours are defined (the 3D view reads them too, see app.js
+   cssColor()). Surfaces stay neutral and step up bg -> surface-1 -> surface-2; the primary (accent) marks buttons,
+   the active step, selected pills and focus; the secondary marks checkboxes, sliders and progress; red is kept for
+   errors and alarms.
+   Dark: the Material dark palette (background #121212, primary #BB86FC, variant #3700B3, secondary #03DAC6,
+   error #CF6679, black text on primary). Maroon (theme id "burgundy"): warm black, beige and maroon #550000.
+   Contrast (WCAG) on surface-1 #1E1E1E: text 12.8:1, text-dim 6.2:1, primary 6.3:1, black on primary 7.9:1,
+   white on burgundy 10.8:1. */
+
+/* ---------- light mode (Light theme, Auto on a light system) ---------- */
+:root {
+  --hue: 180;                                              /* teal */
+  --bg:            oklch(0.965 0.004 var(--hue));
+  --surface-1:     oklch(0.995 0.002 var(--hue));
+  --surface-2:     oklch(0.975 0.004 var(--hue));
+  --surface-3:     oklch(0.945 0.006 var(--hue));
+  --border:        oklch(0.89 0.006 var(--hue));
+  --border-strong: oklch(0.82 0.008 var(--hue));
+  --grid:          oklch(0.80 0.006 var(--hue));
+  --text:          oklch(0.25 0.010 var(--hue));
+  --text-2:        oklch(0.36 0.012 var(--hue));
+  --text-dim:      oklch(0.50 0.012 var(--hue));
+  --accent:        oklch(0.55 0.11 var(--hue));
+  --accent-strong: oklch(0.50 0.11 var(--hue));
+  --accent-hover:  oklch(0.45 0.11 var(--hue));
+  --accent-soft:   oklch(0.55 0.11 var(--hue) / 0.12);
+  --accent-text:   var(--accent-strong);                   /* accent used as text (links, hover) */
+  --accent-ink:    oklch(1 0 0);                           /* text on accent-strong */
+  --secondary:     var(--accent);                          /* checkboxes, sliders, progress */
+  --danger:        oklch(0.55 0.19 25);
+  --warn:          oklch(0.55 0.13 70);
+  --ok:            oklch(0.55 0.13 150);
+  --model:         oklch(0.72 0.025 var(--hue));           /* the loaded model in the 3D view */
+  --tool:          oklch(0.78 0.008 var(--hue));           /* tool head and nozzle */
+  --shade:         oklch(0.30 0.02 260);                   /* shadow colour */
+  --scrim:         oklch(0.20 0.01 260 / 0.45);            /* behind dialogs */
+  color-scheme: light;
+}
+
+/* ---------- dark mode: Material dark (Dark and Maroon themes, Auto on a dark system) ---------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"], [data-theme="yora"]) {   /* one :not keeps the priority of the theme rules below */
+    --bg: #121212; --surface-1: #1e1e1e; --surface-2: #242424; --surface-3: #2c2c2c;
+    --border: #333333; --border-strong: #454545; --grid: #3a3a3a;
+    --text: #e1e1e1; --text-2: #c2c2c2; --text-dim: #9e9e9e;
+    --accent: #bb86fc; --accent-strong: #bb86fc; --accent-hover: #cfa6fd; --accent-text: #bb86fc; --accent-ink: #000000;
+    --accent-soft: color-mix(in srgb, #bb86fc 18%, transparent);
+    --secondary: #03dac6;
+    --danger: #cf6679; --warn: #f2b84b; --ok: #6fcf8f;
+    --model: #8a8a8a; --tool: #c4c4c4; --shade: #000000; --scrim: rgb(0 0 0 / 0.6);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"], :root[data-theme="burgundy"] {
+  --bg: #121212; --surface-1: #1e1e1e; --surface-2: #242424; --surface-3: #2c2c2c;
+  --border: #333333; --border-strong: #454545; --grid: #3a3a3a;
+  --text: #e1e1e1; --text-2: #c2c2c2; --text-dim: #9e9e9e;
+  --accent: #bb86fc; --accent-strong: #bb86fc; --accent-hover: #cfa6fd; --accent-text: #bb86fc; --accent-ink: #000000;
+  --accent-soft: color-mix(in srgb, #bb86fc 18%, transparent);
+  --secondary: #03dac6;
+  --danger: #cf6679; --warn: #f2b84b; --ok: #6fcf8f;
+  --model: #8a8a8a; --tool: #c4c4c4; --shade: #000000; --scrim: rgb(0 0 0 / 0.6);
+  color-scheme: dark;
+}
+
+/* ---------- burgundy: the dark base with burgundy. Fills use the real burgundy (white text); rings, sliders and
+   checkboxes a lighter maroon so they stay visible on the dark surfaces (#550000 itself is 1.2:1 there). ---------- */
+:root[data-theme="burgundy"] {
+  /* burgundy, beige and black: warm black surfaces, beige text and controls, burgundy for the main actions */
+  --bg: #0c0908; --surface-1: #16110f; --surface-2: #1e1816; --surface-3: #27201d;
+  --border: #33292a; --border-strong: #4a3c38; --grid: #3b302b;
+  --text: #efe2cc; --text-2: #d8c6aa; --text-dim: #a8957c;   /* beige: 14.7:1, 11.2:1, 6.5:1 on surface-1 */
+  --model: #a8957c; --tool: #d8c6aa;
+  --accent: #b04848;                                       /* focus rings, slider fills: 3.5:1 on surface-1 */
+  --accent-strong: #550000;                                /* maroon: Slice button, active step */
+  --accent-hover: #6e0b0b;
+  --accent-text: #e08c80;                                  /* maroon as text: 7.3:1 */
+  --accent-ink: #efe2cc;                                   /* beige on maroon: 11.9:1 */
+  --accent-soft: #550000;                                  /* selected pills: solid (a tint of #550000 vanishes on black) */
+  --secondary: #d9bf97;                                    /* beige checkboxes, sliders, progress */
+}
+
+/* ---------- YoRA: the user's palette #B0AA98 #C3BDA7 #B8B29B (greige surfaces), #574D48 #4A413C (warm browns).
+   Selected items and buttons: #574D48 with cream text (6.6:1). Text one step deeper than #4A413C so body text reads
+   on every surface: text 7.2 / 6.4 / 5.8:1 on surface-1 / surface-2 / bg. Light in every system mode. ---------- */
+:root[data-theme="yora"] {
+  --bg: #b0aa98; --surface-1: #c3bda7; --surface-2: #b8b29b; --surface-3: #aea893;
+  --border: #a39d8a; --border-strong: #8c8573; --grid: #9a9481;
+  --text: #342d2a; --text-2: #3f3733; --text-dim: #4a413c;
+  --accent: #574d48; --accent-strong: #574d48; --accent-hover: #4a413c; --accent-text: #4a413c; --accent-ink: #ece7d6;
+  --accent-soft: color-mix(in srgb, #574d48 18%, transparent);
+  --secondary: #574d48;
+  --danger: #7f2a20; --warn: #5f450c; --ok: #2f5029;
+  --model: #6f6560; --tool: #4a413c; --shade: #4a413c; --scrim: rgb(74 65 60 / 0.45);
+  --kind-inner: #8a7a22;                                   /* the yellow wall line darkened for the greige background */
+  color-scheme: light;
+}
+
+/* ---------- derived tokens (same in every theme) ---------- */
+:root {
+  --danger-soft: color-mix(in oklch, var(--danger) 14%, transparent);
+  --warn-soft:   color-mix(in oklch, var(--warn) 14%, transparent);
+  --ok-soft:     color-mix(in oklch, var(--ok) 14%, transparent);
+  --viewport:    var(--bg);                                 /* 3D view background: flat */
+  --shadow-1:    0 1px 2px color-mix(in oklch, var(--shade) 18%, transparent);
+  --shadow-2:    0 6px 18px color-mix(in oklch, var(--shade) 22%, transparent), 0 1px 3px color-mix(in oklch, var(--shade) 12%, transparent);
+
+  /* 3D view and charts (structure: neutral) */
+  --grid-major:  var(--border);
+  --travel:      var(--text-dim);
+  --points:      var(--text);
+  --chart-bg:    var(--surface-2);
+  --chart-line:  var(--text-2);
+  --chart-limit: var(--border-strong);
+
+  /* data colours: feature types (no red, which means fault) and a sequential scale for flow level / speed */
+  --kind-outer:  oklch(0.72 0.16 55);                      /* orange */
+  --kind-inner:  oklch(0.84 0.15 95);                      /* yellow */
+  --kind-sparse: oklch(0.66 0.13 245);                     /* blue */
+  --kind-solid:  oklch(0.62 0.16 300);                     /* violet */
+  --kind-brim:   oklch(0.70 0.14 150);                     /* green */
+  --kind-raft:   oklch(0.72 0.06 70);                      /* tan */
+  --kind-none:   var(--text-dim);
+  --ramp-0: oklch(0.42 0.12 285); --ramp-1: oklch(0.54 0.11 250); --ramp-2: oklch(0.66 0.11 195);
+  --ramp-3: oklch(0.77 0.15 145); --ramp-4: oklch(0.88 0.16 105);
+
+  /* guides drawn on the model */
+  --seam:        oklch(0.72 0.18 330);                     /* magenta: seam points and lines */
+  --guide:       oklch(0.80 0.13 85);                      /* slicing planes */
+  --guide-2:     oklch(0.68 0.12 250);                     /* horizontal base */
+  --robot-joint: oklch(0.78 0.13 75);                      /* joint balls of a robot without 3D model */
+
+  /* alarms from the robot check (red only for real faults) */
+  --err-reach:     var(--danger);
+  --err-limit:     oklch(0.70 0.16 45);
+  --err-sing:      var(--warn);
+  --err-config:    oklch(0.66 0.15 300);
+  --err-collision: var(--danger);
+}

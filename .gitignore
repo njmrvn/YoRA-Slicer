@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Exported programs and G-code
+out/
+
+# Local tool settings
+.claude/
+
+# Personal setup and robot models stay on each PC (the app creates these folders when you save something)
+profiles/*
+!profiles/README.md
