@@ -9,6 +9,7 @@ signals, and then output:
 2. **G-code** (absolute E, no E resets) for other machines and tools
 
 It also **imports G-code from Orca / Prusa / Bambu / Cura**. You can slice there and use this app only for the robot side.
+
 <img width="2555" height="1406" alt="image" src="https://github.com/user-attachments/assets/f5611b4c-29a4-4562-8899-1447d60a6b63" />
 <img width="2550" height="1405" alt="image" src="https://github.com/user-attachments/assets/990cc2f3-4fd7-4411-9993-5bfbec0bcb4c" />
 
