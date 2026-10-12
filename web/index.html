@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YoRA Slicer</title>
+<script>
+  // Interface choice: the classic interface stays available at /classic/ (menu > Classic interface).
+  try {
+    // one-time: settings saved before the app was renamed YoRA keep working
+    Object.keys(localStorage).forEach(function (k) {
+      var m = /^njmfgf\.(.+)$/.exec(k);
+      if (m && localStorage.getItem('yora.' + m[1]) === null) localStorage.setItem('yora.' + m[1], localStorage.getItem(k));
+    });
+    var t = localStorage.getItem('yora.theme'); if (t) document.documentElement.dataset.theme = t;
+    document.documentElement.dataset.style = localStorage.getItem('yora.style') || 'clay';   // clay | flat
+    if (localStorage.getItem('yora.ui') === 'classic' && location.search.indexOf('new') < 0) location.replace('/classic/');
+  } catch (e) { document.documentElement.dataset.style = 'clay'; /* storage blocked: defaults */ }
+</script>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Nunito:wght@700;800;900&display=swap">
+<link rel="stylesheet" href="clay.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div class="clay-blobs" aria-hidden="true"><i></i><i></i><i></i></div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-open" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+  <symbol id="i-slice" viewBox="0 0 24 24"><path d="M4 8h16M4 12h16M4 16h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 19h14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 4l8 4-8 4-8-4zM4 12l8 4 8-4M4 16l8 4 8-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+</svg>
+
+<header class="topbar">
+  <div class="brand"><span class="logo" aria-hidden="true">◆</span><span class="brand-name">YoRA</span><span class="brand-sub">Slicer</span></div>
+  <nav class="steps" role="tablist" aria-label="Workflow">
+    <button id="tabPrepare" class="step active" role="tab"><span class="num">1</span>Prepare</button>
+    <button id="tabPreview" class="step" role="tab"><span class="num">2</span>Preview</button>
+    <button id="tabRobot" class="step" role="tab"><span class="num">3</span>Robot</button>
+    <button id="tabExport" class="step" role="tab"><span class="num">4</span>Export</button>
+  </nav>
+  <div class="actions">
+    <label class="btn ghost" title="STL, OBJ, 3MF or G-code to slice; a .robot robot model file for the robot"><svg class="ic"><use href="#i-open"/></svg>Open<input id="fileInput" type="file" accept=".stl,.obj,.3mf,.gcode,.gco,.g,.nc,.robot" hidden></label>
+    <select id="sampleSelect" class="btn ghost" aria-label="Open a sample"><option value="">Samples</option></select>
+    <button id="btnSlice" class="btn primary" disabled><svg class="ic"><use href="#i-slice"/></svg>Slice</button>
+    <details class="menu">
+      <summary class="btn ghost icon-only" title="More" aria-label="More"><svg class="ic"><use href="#i-more"/></svg></summary>
+      <div class="menu-items">
+        <div class="menu-label">Theme</div>
+        <div class="seg" id="themeSeg"><button data-theme="">Auto</button><button data-theme="light">Light</button><button data-theme="dark">Dark</button><button data-theme="burgundy" title="Maroon, beige and black">Maroon</button><button data-theme="yora" title="Sand, taupe and cream">YoRA</button></div>
+        <div class="menu-label">Style</div>
+        <div class="seg" id="styleSeg"><button data-style="clay" title="Soft volume, rounded shapes, tactile buttons">Clay</button><button data-style="flat" title="The plain flat style">Flat</button></div>
+        <div class="menu-sep"></div>
+        <button id="uiClassic" class="menu-item">Switch to the classic interface</button>
+        <div class="menu-note">Your settings, profiles and robot cells are shared. Switch back from the classic interface's top bar.</div>
+      </div>
+    </details>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="viewport" id="viewport">
+    <div class="drop-hint" id="dropHint">
+      <div class="drop-card">
+        <div class="drop-icon"><svg class="ic xl"><use href="#i-layers"/></svg></div>
+        <div class="drop-title">Drop a model or G-code here</div>
+        <div class="drop-sub">STL · OBJ · 3MF to slice, G-code from Orca / Prusa / Bambu, or a .robot robot model file</div>
+      </div>
+    </div>
+    <div class="view-tools" role="toolbar" aria-label="View">
+      <button data-view="iso" title="Iso view">Iso</button>
+      <button data-view="top" title="Top view">Top</button>
+      <button data-view="front" title="Front view">Front</button>
+      <button data-view="fit" title="Fit to model">Fit</button>
+      <details class="show-menu">
+        <summary title="Show or hide the origin markers">Show</summary>
+        <div class="show-items">
+          <label class="chk"><input type="checkbox" data-marker="robot"> Robot base axes</label>
+          <label class="chk"><input type="checkbox" data-marker="tcp"> TCP marker (tip + axes)</label>
+          <label class="chk"><input type="checkbox" data-marker="bed"> Bed origin axes</label>
+        </div>
+      </details>
+    </div>
+    <div class="legend" id="legend" hidden>
+      <div class="legend-head">
+        <select id="colorMode" aria-label="Color by">
+          <option value="kind">Feature type</option>
+          <option value="level">Extruder flow level (DO)</option>
+          <option value="speed">Speed</option>
+        </select>
+      </div>
+      <div id="legendItems"></div>
+      <div class="legend-opts">
+        <label class="show-as"><span>Show as</span><select id="showAs" aria-label="Show toolpath as">
+          <option value="lines">Toolpath lines</option>
+          <option value="beads">Extrusions</option>
+        </select></label>
+        <label class="chk"><input type="checkbox" id="showTravel"> Travel</label>
+        <label class="chk"><input type="checkbox" id="showModel"> Model</label>
+        <label class="chk"><input type="checkbox" id="singleLayer"> Single layer</label>
+        <label class="chk" title="Show every point of the toolpath (the targets the robot moves through)"><input type="checkbox" id="showPoints"> Points <span class="muted small" id="pointsCount"></span></label>
+        <label class="chk" title="Mark where each outer wall loop starts"><input type="checkbox" id="showSeams"> Seams</label>
+      </div>
+    </div>
+    <div class="layer-slider" id="layerBox" hidden>
+      <div class="layer-label" id="layerLabel">—</div>
+      <input type="range" id="layerRange" min="0" max="0" value="0" orient="vertical" aria-label="Top layer">
+      <div class="layer-label small" id="layerZ"></div>
+    </div>
+    <div class="progress" id="progress" hidden><div class="bar" id="progressBar"></div><span id="progressText"></span></div>
+    <div class="play-bar" id="playBar" hidden>
+      <button id="playBtn" class="btn small" title="Play / pause">▶</button>
+      <input type="range" id="rbPlay" min="0" max="0" value="0" aria-label="Robot simulation position">
+      <select id="playSpeed" aria-label="Simulation speed"></select>
+      <label class="chk small" title="Draw the toolpath only up to where the nozzle is, so it appears as the robot prints"><input type="checkbox" id="playFollow" checked> print as it moves</label>
+      <span id="playLabel" class="muted small"></span>
+    </div>
+    <div class="code-panel" id="codePanel" hidden>
+      <div class="code-head"><span id="codeTitle">Program preview</span><span class="spacer"></span><button class="btn small ghost" id="codeClose">Close</button></div>
+      <pre id="codeText" class="code"></pre>
+    </div>
+    <div class="toast-box" id="toasts"></div>
+  </section>
+
+  <aside class="sidebar">
+    <!-- 1 · Prepare -->
+    <div id="sidePrepare" class="side">
+      <section class="card" id="objectPanel">
+        <header class="card-head"><h2>Object</h2></header>
+        <div id="objectEmpty" class="empty">No model loaded. Open a file or pick a sample.</div>
+        <div id="objectBody" hidden>
+          <div class="obj-line"><span class="obj-name" id="objName"></span><span class="obj-size" id="objSize"></span></div>
+          <div class="grid3">
+            <span></span><span class="ax">X</span><span class="ax">Y</span><span class="ax">Z</span>
+            <span class="lbl">Scale %</span><input id="sx" type="number" step="1" value="100"><input id="sy" type="number" step="1" value="100"><input id="sz" type="number" step="1" value="100">
+            <span class="lbl">Rotate °</span><input id="rx" type="number" step="15" value="0"><input id="ry" type="number" step="15" value="0"><input id="rz" type="number" step="15" value="0">
+            <span class="lbl">Position</span><input id="px" type="number" step="10"><input id="py" type="number" step="10"><span class="muted center small">on bed</span>
+          </div>
+          <div class="row-btns">
+            <label class="chk"><input type="checkbox" id="lockScale" checked> Uniform scale</label>
+            <button id="btnCenter" class="btn small">Center on bed</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" id="matPanel">
+        <header class="card-head">
+          <h2>Material</h2>
+          <div class="head-actions">
+            <button id="matEdit" class="btn small" disabled title="Edit the selected material">Edit</button>
+            <button id="matNew" class="btn small" title="Add a material">New</button>
+          </div>
+        </header>
+        <select id="matSelect" aria-label="Material"></select>
+        <div id="matInfo" class="mat-info"></div>
+      </section>
+
+      <section class="card" id="seamPanel" hidden>
+        <header class="card-head"><h2>Seam</h2><span class="muted small" id="seamState"></span></header>
+        <div class="row-btns seam-tools">
+          <button id="seamPick" class="btn small" title="Click a point on the part: every layer starts as close to it as it can">Pick point</button>
+          <button id="seamDraw" class="btn small" title="Paint a line on the part: each layer starts where the line crosses it">Draw line</button>
+          <button id="seamUndo" class="btn small" hidden>Undo</button>
+          <button id="seamReset" class="btn small" title="Back to aligned seams">Reset</button>
+        </div>
+        <div class="muted small" id="seamHint">Pick a point or draw a line on the part to place the seam. More options under Seam &amp; layer change.</div>
+      </section>
+
+      <section class="card grow">
+        <header class="card-head">
+          <h2>Print settings</h2>
+          <div class="head-actions">
+            <select id="profileSelect" aria-label="Profile"><option value="">(defaults)</option></select>
+            <button id="btnSaveProfile" class="btn small">Save as…</button>
+          </div>
+        </header>
+        <div class="settings-tools">
+          <div class="search"><svg class="ic"><use href="#i-search"/></svg><input id="settingsSearch" type="search" placeholder="Search settings" aria-label="Search settings"></div>
+          <div class="seg" id="detailSeg" role="radiogroup" aria-label="Settings shown">
+            <button data-level="essential" class="on">Essentials</button><button data-level="all">All</button>
+          </div>
+        </div>
+        <div id="settingsForm" class="settings"></div>
+      </section>
+    </div>
+
+    <!-- 2 · Preview -->
+    <div id="sidePreview" class="side" hidden>
+      <section class="card">
+        <header class="card-head"><h2>Print summary</h2><span class="head-note" id="summarySource"></span></header>
+        <div id="summaryGrid" class="stat-grid"><div class="empty">Slice a model to see the print time, material and flow.</div></div>
+      </section>
+      <section class="card">
+        <header class="card-head"><h2>Next</h2></header>
+        <div class="next-steps">
+          <button class="btn block" data-go="robot">Check the robot path<span class="muted small">reach, limits, collisions, simulation</span></button>
+          <button class="btn block" data-go="export">Export the program<span class="muted small">Borunte .act, KUKA KRL, G-code</span></button>
+        </div>
+      </section>
+      <section class="card" id="warnCard" hidden>
+        <header class="card-head"><h2>Warnings</h2></header>
+        <ul id="warnList" class="warn-list"></ul>
+      </section>
+    </div>
+
+    <!-- 3 · Robot -->
+    <div id="sideRobot" class="side" data-pane="setup" hidden>
+      <div class="subtabs" role="tablist" aria-label="Robot">
+        <button data-pane="setup" class="on">Setup</button>
+        <button data-pane="jog">Jog</button>
+        <button data-pane="path">Path</button>
+        <button data-pane="check">Check</button>
+      </div>
+      <div id="robotForm" class="settings robot-form"></div>
+      <section class="card" data-pane="check">
+        <header class="card-head"><h2>Simulation &amp; checks</h2><div class="head-actions"><button id="rbCheck" class="btn primary small">Check robot path</button></div></header>
+        <div id="rbStatus"></div>
+        <div id="rbResult"><div class="empty">Run the check to solve the robot joints for every move, then play the simulation.</div></div>
+      </section>
+    </div>
+
+    <!-- 4 · Export -->
+    <div id="sideExport" class="side" hidden>
+      <section class="card">
+        <header class="card-head"><h2>Post-processor</h2><div class="head-actions"><button id="btnPostEdit" class="btn small"><svg class="ic"><use href="#i-edit"/></svg>Edit…</button></div></header>
+        <label class="field-stack"><span>Program for</span><select id="postSelect" aria-label="Post-processor"></select></label>
+        <div id="postInfo" class="post-info"></div>
+        <button id="btnExportProgram" class="btn primary block lg" disabled><svg class="ic"><use href="#i-download"/></svg><span id="btnExportLabel">Export program</span></button>
+        <button id="btnPreviewCode" class="btn block" disabled><svg class="ic"><use href="#i-code"/></svg>Preview program</button>
+        <div id="exportRobotNote" class="note"></div>
+      </section>
+      <section class="card">
+        <header class="card-head"><h2>Other outputs</h2></header>
+        <div class="stack">
+          <button id="btnExportGcode" class="btn block" disabled>G-code for other machines and tools</button>
+        </div>
+      </section>
+      <section class="card" id="historyCard" hidden>
+        <header class="card-head"><h2>Exported this session</h2></header>
+        <ul id="historyList" class="history"></ul>
+      </section>
+    </div>
+  </aside>
+</main>
+
+<footer class="statusbar" id="statusbar">
+  <span id="statusText">Open a model to start.</span>
+</footer>
+
+<dialog id="matDialog">
+  <div class="dlg mat-dlg">
+    <h3 id="matTitle">Material</h3>
+    <div id="matBuiltinNote" class="note" hidden>This is a built-in example. Saving makes your own copy under the name below.</div>
+    <div class="mat-grid">
+      <label>Name <input id="mName" type="text" maxlength="80" placeholder="e.g. Recycled PETG black"></label>
+      <label>Brand <input id="mBrand" type="text" maxlength="80" placeholder="e.g. Manufacturer"></label>
+      <label>Type <input id="mType" type="text" list="mTypes" maxlength="40" placeholder="PLA, PETG, PP-GF…"><datalist id="mTypes"></datalist></label>
+      <label>Colour <input id="mColor" type="color"></label>
+    </div>
+    <div class="mat-zones-head">
+      <b>Heating zones</b>
+      <div class="seg" id="mZoneMode" data-mode="single"><button type="button" data-mode="single">1 zone</button><button type="button" data-mode="multi">Multiple zones</button></div>
+    </div>
+    <div id="mZones" class="mat-zones"></div>
+    <button type="button" id="mAddZone" class="btn small mat-add">+ Add zone</button>
+    <div class="mat-grid">
+      <label>Bed temperature <span class="mat-unit"><input id="mBed" type="number" min="0" max="200" step="1"><span class="muted">°C, 0 = off</span></span></label>
+      <label>Density <span class="mat-unit"><input id="mDensity" type="number" min="0.1" max="20" step="0.01"><span class="muted">g/cm³</span></span></label>
+      <label>Flow multiplier <span class="mat-unit"><input id="mFlow" type="number" min="0" max="300" step="1"><span class="muted">%, 0 = keep</span></span></label>
+      <label>Drying <span class="mat-unit"><input id="mDryT" type="number" min="0" max="200" step="1"><span class="muted">°C</span><input id="mDryH" type="number" min="0" max="96" step="0.5"><span class="muted">h</span></span></label>
+    </div>
+    <label class="mat-notes">Notes <textarea id="mNotes" rows="3" maxlength="2000" placeholder="Supplier, batch, tips…"></textarea></label>
+    <div class="dlg-actions">
+      <button type="button" id="mDelete" class="btn danger">Delete</button>
+      <span class="spacer"></span>
+      <button type="button" id="mCancel" class="btn">Cancel</button>
+      <button type="button" id="mSave" class="btn primary">Save material</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="postDialog" class="post-dialog">
+  <div class="pe">
+    <aside class="pe-list">
+      <div class="pe-list-head"><h3>Post-processors</h3><button id="peNew" class="btn small">New</button></div>
+      <div id="peList" class="pe-items"></div>
+    </aside>
+    <section class="pe-main">
+      <div class="pe-top">
+        <input id="peName" class="pe-name" aria-label="Post-processor name">
+        <select id="peLang" aria-label="Language"></select>
+        <span class="spacer"></span>
+        <button id="peDup" class="btn small">Duplicate</button>
+        <button id="peDelete" class="btn small danger">Delete</button>
+      </div>
+      <div id="peBuiltin" class="note" hidden>Built-in post-processor: read only. Use <b>Duplicate</b> to make your own version.</div>
+      <input id="peDesc" class="pe-desc" placeholder="Description (optional)" aria-label="Description">
+      <div class="pe-section-title">Language options</div>
+      <div id="peOptions" class="pe-options"></div>
+      <div class="pe-section-title">Events</div>
+      <div class="pe-events">
+        <nav id="peEventList" class="pe-event-list" aria-label="Events"></nav>
+        <div class="pe-editor">
+          <div id="peEventHelp" class="muted small"></div>
+          <textarea id="peEventText" spellcheck="false" aria-label="Event commands" placeholder="One command per line, for example:&#10;DO 5 ON&#10;WAIT 0.5&#10;COMMENT Layer {layer}"></textarea>
+          <div class="pe-ref">
+            <div><b>Commands</b> <code>DO n ON|OFF</code> <code>WAIT seconds</code> <code>WAIT_DI n ON|OFF</code> <code>COMMENT text</code> <span id="peRawNote"></span></div>
+            <div id="pePlaceholders" class="chips"></div>
+          </div>
+        </div>
+      </div>
+      <div id="peProblems" class="problems"></div>
+      <div class="pe-actions">
+        <button id="pePreview" class="btn"><svg class="ic"><use href="#i-code"/></svg>Preview with this job</button>
+        <span class="spacer"></span>
+        <button id="peClose" class="btn">Close</button>
+        <button id="peSave" class="btn primary">Save</button>
+      </div>
+      <pre id="pePreviewOut" class="code pe-preview" hidden></pre>
+    </section>
+  </div>
+</dialog>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

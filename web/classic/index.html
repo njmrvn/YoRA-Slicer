@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YoRA Slicer</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">◆</span> YoRA Slicer <span class="sub">classic interface</span>
+    <a href="/" class="btn small" id="uiSwitch" title="Switch to the new interface (your settings are shared)"
+       onclick="try { localStorage.setItem('yora.ui', 'new'); } catch (e) {}">New interface</a></div>
+  <nav class="modes" role="tablist">
+    <button id="tabPrepare" class="mode active" role="tab">Prepare</button>
+    <button id="tabPreview" class="mode" role="tab">Preview</button>
+    <button id="tabRobot" class="mode" role="tab">Robot</button>
+  </nav>
+  <div class="actions">
+    <label class="btn" title="STL, OBJ, 3MF or G-code to slice; a .robot robot model file for the robot">Open…<input id="fileInput" type="file" accept=".stl,.obj,.3mf,.gcode,.gco,.g,.nc,.robot" hidden></label>
+    <select id="sampleSelect" class="btn" aria-label="Open a sample"><option value="">Samples…</option></select>
+    <button id="btnSlice" class="btn primary" disabled>Slice</button>
+    <div class="split">
+      <button id="btnExportAct" class="btn" disabled>Export Borunte .act</button>
+      <button id="btnExportGcode" class="btn" disabled>G-code</button>
+    </div>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="viewport" id="viewport">
+    <div class="drop-hint" id="dropHint">
+      <div class="drop-card">
+        <div class="drop-title">Drop a model or G-code here</div>
+        <div class="drop-sub">STL · OBJ · 3MF to slice here, or G-code from Orca / Prusa / Bambu to send to the robot</div>
+      </div>
+    </div>
+    <div class="view-tools">
+      <button data-view="iso" title="Iso view">Iso</button>
+      <button data-view="top" title="Top view">Top</button>
+      <button data-view="front" title="Front view">Front</button>
+      <button data-view="fit" title="Fit to model">Fit</button>
+      <details class="show-menu">
+        <summary title="Show or hide the origin markers">Show ▾</summary>
+        <div class="show-items">
+          <label class="chk"><input type="checkbox" data-marker="robot"> Robot base axes</label>
+          <label class="chk"><input type="checkbox" data-marker="tcp"> TCP marker (tip + axes)</label>
+          <label class="chk"><input type="checkbox" data-marker="bed"> Bed origin axes</label>
+        </div>
+      </details>
+    </div>
+    <div class="legend" id="legend" hidden>
+      <div class="legend-head">
+        <select id="colorMode" aria-label="Color by">
+          <option value="kind">Feature type</option>
+          <option value="level">Extruder flow level (DO)</option>
+          <option value="speed">Speed</option>
+        </select>
+      </div>
+      <div id="legendItems"></div>
+      <label class="show-as">Show as <select id="showAs" aria-label="Show toolpath as">
+        <option value="lines">Toolpath (lines)</option>
+        <option value="beads">Extrusions (width × layer height)</option>
+      </select></label>
+      <label class="chk"><input type="checkbox" id="showTravel"> Travel moves</label>
+      <label class="chk"><input type="checkbox" id="showModel"> Model</label>
+      <label class="chk"><input type="checkbox" id="singleLayer"> Single layer</label>
+    </div>
+    <div class="layer-slider" id="layerBox" hidden>
+      <div class="layer-label" id="layerLabel">—</div>
+      <input type="range" id="layerRange" min="0" max="0" value="0" orient="vertical" aria-label="Top layer">
+      <div class="layer-label small" id="layerZ"></div>
+    </div>
+    <div class="progress" id="progress" hidden><div class="bar" id="progressBar"></div><span id="progressText"></span></div>
+    <div class="play-bar" id="playBar" hidden>
+      <button id="playBtn" class="btn small" title="Play / pause">▶</button>
+      <input type="range" id="rbPlay" min="0" max="0" value="0" aria-label="Robot simulation position">
+      <select id="playSpeed" aria-label="Simulation speed"></select>
+      <label class="chk small" title="Draw the toolpath only up to where the nozzle is, so it appears as the robot prints"><input type="checkbox" id="playFollow" checked> print as it moves</label>
+      <span id="playLabel" class="muted small"></span>
+    </div>
+    <div class="toast-box" id="toasts"></div>
+  </section>
+
+  <aside class="sidebar">
+    <div id="sideRobot" hidden>
+      <div class="panel">
+        <div class="panel-title">Robot cell</div>
+        <div id="robotForm" class="settings"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">6 · Simulation &amp; checks <span class="title-actions"><button id="rbCheck" class="btn primary small">Check robot path</button></span></div>
+        <div id="rbStatus"></div>
+        <div id="rbResult"><div class="muted small">Run the check to solve the robot joints for every move.</div></div>
+      </div>
+    </div>
+    <div id="sidePrepare">
+    <div class="panel" id="objectPanel">
+      <div class="panel-title">Object</div>
+      <div id="objectEmpty" class="muted">No model loaded.</div>
+      <div id="objectBody" hidden>
+        <div class="obj-name" id="objName"></div>
+        <div class="obj-size" id="objSize"></div>
+        <div class="grid3">
+          <span></span><span class="ax">X</span><span class="ax">Y</span><span class="ax">Z</span>
+          <span class="lbl">Scale %</span><input id="sx" type="number" step="1" value="100"><input id="sy" type="number" step="1" value="100"><input id="sz" type="number" step="1" value="100">
+          <span class="lbl">Rotate °</span><input id="rx" type="number" step="15" value="0"><input id="ry" type="number" step="15" value="0"><input id="rz" type="number" step="15" value="0">
+          <span class="lbl">Position</span><input id="px" type="number" step="10"><input id="py" type="number" step="10"><span class="muted center">on bed</span>
+        </div>
+        <div class="row-btns">
+          <label class="chk"><input type="checkbox" id="lockScale" checked> Uniform scale</label>
+          <button id="btnCenter" class="btn small">Center on bed</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Profile
+        <span class="title-actions">
+          <select id="profileSelect" aria-label="Profile"><option value="">(defaults)</option></select>
+          <button id="btnSaveProfile" class="btn small">Save as…</button>
+        </span>
+      </div>
+      <div id="settingsForm" class="settings"></div>
+    </div>
+    </div>
+  </aside>
+</main>
+
+<footer class="statusbar" id="statusbar">
+  <span id="statusText">Open a model to start.</span>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

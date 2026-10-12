@@ -1,0 +1,187 @@
+/* YoRA Slicer - "clay" style: soft volume, layered light, rounded shapes, tactile motion.
+   Only the look changes: every rule is scoped to :root[data-style="clay"] and uses the theme colours from style.css
+   (Auto / Light / Dark / Maroon), so menu > Style > Flat returns to the plain style at any time.
+   Light comes from the top left: raised parts catch a highlight there and cast a soft shadow down-right; recessed
+   parts (inputs, the track of segmented controls) are shaded inside. */
+
+/* ---------- light tokens (Light theme, Auto on a light system) ---------- */
+:root[data-style="clay"] {
+  --clay-hi: oklch(1 0 0 / .92);                 /* top-left highlight */
+  --clay-lo: color-mix(in oklch, var(--shade) 30%, transparent);                 /* soft drop shadow */
+  --clay-rim: oklch(1 0 0 / .85);                /* inner rim light */
+  --clay-dark: color-mix(in oklch, var(--shade) 8%, transparent);                  /* inner shading, bottom right */
+  --clay-tint: color-mix(in oklch, var(--shade) 3%, transparent);
+  --clay-glass: color-mix(in srgb, var(--panel) 80%, transparent);
+  --clay-well: color-mix(in srgb, var(--panel-3) 70%, var(--panel));
+  --clay-sheen: oklch(1 0 0 / .55);              /* top light on accent buttons */
+  --clay-blob-a: color-mix(in oklch, var(--text) 4%, transparent);    /* neutral: large areas stay uncoloured */
+  --clay-blob-b: color-mix(in oklch, var(--text) 3%, transparent);
+  --r-xl: 28px; --r-lg: 22px; --r-md: 16px; --r-sm: 12px;
+  --sh-card: 10px 12px 26px var(--clay-lo), -8px -8px 18px var(--clay-hi), inset 3px 3px 6px var(--clay-tint), inset -3px -3px 6px var(--clay-rim);
+  --sh-float: 14px 16px 34px var(--clay-lo), -8px -8px 20px var(--clay-hi), inset 3px 3px 6px var(--clay-tint), inset -3px -3px 6px var(--clay-rim);
+  --sh-btn: 5px 6px 12px var(--clay-lo), -4px -4px 9px var(--clay-hi), inset 2px 2px 3px var(--clay-rim), inset -2px -2px 4px var(--clay-dark);
+  --sh-btn-hover: 7px 9px 16px var(--clay-lo), -5px -5px 11px var(--clay-hi), inset 2px 2px 3px var(--clay-rim), inset -2px -2px 4px var(--clay-dark);
+  --sh-accent: 5px 6px 12px var(--clay-lo), -4px -4px 9px var(--clay-hi), inset 0 1px 0 var(--clay-sheen);
+  --sh-accent-hover: 7px 9px 16px var(--clay-lo), -5px -5px 11px var(--clay-hi), inset 0 1px 0 var(--clay-sheen);
+  --sh-pressed: inset 3px 3px 7px var(--clay-lo), inset -3px -3px 7px var(--clay-hi);
+  --font-head: "Nunito", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --font-body: "DM Sans", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+}
+/* ---------- dark clay (Dark, Maroon, Auto on a dark system): no white glare, deeper shadows ---------- */
+@media (prefers-color-scheme: dark) {
+  :root[data-style="clay"]:not([data-theme="light"], [data-theme="yora"]) {
+    --clay-hi: oklch(1 0 0 / .045); --clay-lo: oklch(0 0 0 / .55); --clay-rim: oklch(1 0 0 / .06);
+    --clay-dark: oklch(0 0 0 / .35); --clay-sheen: oklch(1 0 0 / .28);
+    --clay-glass: color-mix(in srgb, var(--panel) 84%, transparent);
+    --clay-well: color-mix(in srgb, var(--bg) 70%, var(--panel));
+    --clay-blob-a: color-mix(in oklch, var(--text) 3%, transparent); --clay-blob-b: color-mix(in oklch, var(--text) 2%, transparent);
+  }
+}
+:root[data-style="clay"][data-theme="dark"], :root[data-style="clay"][data-theme="burgundy"] {
+  --clay-hi: oklch(1 0 0 / .045); --clay-lo: oklch(0 0 0 / .55); --clay-rim: oklch(1 0 0 / .06);
+  --clay-dark: oklch(0 0 0 / .35); --clay-sheen: oklch(1 0 0 / .28);
+  --clay-glass: color-mix(in srgb, var(--panel) 84%, transparent);
+  --clay-well: color-mix(in srgb, var(--bg) 70%, var(--panel));
+  --clay-blob-a: color-mix(in oklch, var(--text) 3%, transparent); --clay-blob-b: color-mix(in oklch, var(--text) 2%, transparent);
+}
+
+/* ---------- YoRA: no white glow on the sand surfaces; a faint cream edge and warm brown shadows instead ---------- */
+:root[data-style="clay"][data-theme="yora"] {
+  --clay-hi: color-mix(in srgb, #ece7d6 14%, transparent);
+  --clay-rim: color-mix(in srgb, #ece7d6 22%, transparent);
+  --clay-lo: color-mix(in srgb, #4a413c 26%, transparent);
+  --clay-dark: color-mix(in srgb, #4a413c 10%, transparent);
+  --clay-sheen: color-mix(in srgb, #ece7d6 20%, transparent);
+  --clay-glass: color-mix(in srgb, var(--panel) 94%, transparent);
+  --clay-well: var(--surface-2);
+  --clay-blob-a: transparent; --clay-blob-b: transparent;
+}
+
+/* ---------- typography: rounded Nunito for headings and numbers, DM Sans for text ---------- */
+:root[data-style="clay"] body { font-family: var(--font-body); }
+:root[data-style="clay"] :is(.brand-name, .card-head h2, .step, .settings summary, .stat .v, .layer-label, .drop-title,
+  .dlg h3, .code-head, .legend-head select, .subtabs button, .badge, .pe-section-title) { font-family: var(--font-head); }
+:root[data-style="clay"] .brand-name { font-weight: 900; letter-spacing: -.2px; font-size: 16px; }
+:root[data-style="clay"] .card-head h2 { font-weight: 800; font-size: 14px; letter-spacing: .1px; }
+:root[data-style="clay"] .stat .v { font-weight: 900; font-size: 19px; letter-spacing: -.2px; }
+:root[data-style="clay"] .settings summary { font-weight: 800; }
+:root[data-style="clay"] .step { font-weight: 700; }
+
+/* ---------- background: soft drifting glows in the theme's accent ---------- */
+.clay-blobs { display: none; }
+:root[data-style="clay"] .clay-blobs { display: block; position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+:root[data-style="clay"] .clay-blobs i {
+  position: absolute; width: 60vh; height: 60vh; border-radius: 50%; filter: blur(70px); will-change: transform;
+  background: var(--clay-blob-a); animation: clay-float 11s ease-in-out infinite;
+}
+:root[data-style="clay"] .clay-blobs i:nth-child(1) { top: -15%; left: -10%; }
+:root[data-style="clay"] .clay-blobs i:nth-child(2) { top: 25%; right: -18%; background: var(--clay-blob-b); animation-name: clay-float-alt; animation-duration: 13s; animation-delay: -4s; }
+:root[data-style="clay"] .clay-blobs i:nth-child(3) { bottom: -25%; left: 30%; width: 50vh; height: 50vh; animation-duration: 15s; animation-delay: -8s; }
+@keyframes clay-float { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-24px) rotate(3deg); } }
+@keyframes clay-float-alt { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-16px) rotate(-3deg); } }
+
+/* ---------- frame: floating top bar, rounded 3D view, floating status bar ---------- */
+:root[data-style="clay"] body { background: var(--bg); }
+:root[data-style="clay"] .topbar {
+  margin: 10px 10px 0; height: 54px; border: 0; border-radius: var(--r-lg); box-shadow: var(--sh-card); position: relative; z-index: 10;
+}
+:root[data-style="clay"] .topbar { background: var(--clay-glass); backdrop-filter: blur(16px); }
+:root[data-style="clay"] .steps { align-items: center; gap: 4px; }
+:root[data-style="clay"] .step {
+  height: 38px; border-radius: var(--r-md); border-bottom: 0; margin: 0; padding: 0 14px;
+  transition: background .2s, box-shadow .2s, transform .2s, color .2s;
+}
+:root[data-style="clay"] .step:hover:not(:disabled) { transform: translateY(-1px); }
+:root[data-style="clay"] .step.active { background: var(--panel); box-shadow: var(--sh-btn); }
+:root[data-style="clay"] .step.active .num { box-shadow: 1px 2px 4px var(--clay-lo); }
+:root[data-style="clay"] .layout { gap: 0; padding: 10px 0 10px 10px; min-height: 0; }
+:root[data-style="clay"] .viewport { border-radius: var(--r-xl); box-shadow: var(--sh-card); }
+:root[data-style="clay"] .sidebar { background: transparent; border-left: 0; }
+:root[data-style="clay"] .side { padding: 2px 10px 14px 12px; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+:root[data-style="clay"] .side > * { min-width: 0; }
+:root[data-style="clay"] .card { grid-template-columns: minmax(0, 1fr); }
+:root[data-style="clay"] .card > *, :root[data-style="clay"] .head-actions { min-width: 0; }
+:root[data-style="clay"] .head-actions select { min-width: 0; flex: 1 1 auto; width: auto; max-width: 150px; }   /* the slightly wider fonts must not push cards past the panel */
+:root[data-style="clay"] .statusbar {
+  margin: 0 10px 10px; border: 0; border-radius: var(--r-md); box-shadow: var(--sh-card);
+}
+:root[data-style="clay"] .statusbar { background: var(--clay-glass); backdrop-filter: blur(16px); }
+
+/* ---------- cards: glass clay ---------- */
+:root[data-style="clay"] .card {
+  border-radius: var(--r-lg); border-color: transparent; background: var(--clay-glass); backdrop-filter: blur(18px);
+  box-shadow: var(--sh-card); padding: 12px 12px 14px;
+}
+:root[data-style="clay"] .settings details { border: 0; border-radius: var(--r-md); background: var(--panel); box-shadow: var(--sh-btn); transition: box-shadow .25s; }
+:root[data-style="clay"] .settings summary { border-radius: var(--r-md); padding: 11px 18px; }
+:root[data-style="clay"] .settings .fields { padding: 0 16px 12px 24px; }   /* clear of the rounded corners */
+:root[data-style="clay"] .field { border-radius: var(--r-sm); }
+:root[data-style="clay"] .stat { border-radius: var(--r-md); background: var(--panel); box-shadow: var(--sh-btn); }
+:root[data-style="clay"] .badge { box-shadow: var(--sh-btn); border-color: transparent; }
+:root[data-style="clay"] .chip { box-shadow: 2px 2px 5px var(--clay-lo), -2px -2px 5px var(--clay-hi); border-color: transparent; transition: transform .2s; }
+:root[data-style="clay"] .chip:hover { transform: translateY(-1px); }
+
+/* ---------- buttons: raised, lift on hover, squish when pressed ---------- */
+:root[data-style="clay"] .btn {
+  border-radius: 14px; border-color: transparent; background: var(--panel); box-shadow: var(--sh-btn);
+  transition: transform .2s cubic-bezier(.3, 1.4, .5, 1), box-shadow .2s, background .2s, color .2s;
+}
+:root[data-style="clay"] .btn.small { border-radius: 11px; }
+:root[data-style="clay"] .btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: var(--sh-btn-hover); background: var(--panel); border-color: transparent; }
+:root[data-style="clay"] .btn:active:not(:disabled) { transform: scale(.95); box-shadow: var(--sh-pressed); transition-duration: .08s; }
+:root[data-style="clay"] .btn.primary { background: var(--accent-strong); box-shadow: var(--sh-accent); color: var(--accent-ink); }
+:root[data-style="clay"] .btn.primary:hover:not(:disabled) { background: var(--accent-hover); box-shadow: var(--sh-accent-hover); }
+:root[data-style="clay"] .btn.primary:active:not(:disabled) { box-shadow: var(--sh-pressed); }
+:root[data-style="clay"] .seam-tools .btn.on { background: var(--accent-soft); box-shadow: var(--sh-pressed); color: var(--text); }
+:root[data-style="clay"] .btn.ghost { background: transparent; box-shadow: none; }
+:root[data-style="clay"] .btn.ghost:hover:not(:disabled) { background: var(--clay-well); box-shadow: none; }
+:root[data-style="clay"] .btn:disabled { box-shadow: none; background: var(--clay-well); }
+:root[data-style="clay"] .next-steps .btn { border-radius: var(--r-md); }
+:root[data-style="clay"] .next-steps .btn:hover:not(:disabled) { transform: translateY(-2px); }
+
+/* ---------- inputs: pressed into the surface ---------- */
+:root[data-style="clay"] :is(input[type=number], input[type=text], input[type=search], select, textarea) {
+  border-color: transparent; border-radius: var(--r-sm); background: var(--clay-well); box-shadow: var(--sh-pressed);
+  transition: background .2s, box-shadow .2s;
+}
+:root[data-style="clay"] :is(input, select, textarea):focus {
+  background: var(--panel); border-color: transparent;
+  box-shadow: 0 0 0 3px var(--accent-soft), 3px 4px 10px var(--clay-lo);
+}
+:root[data-style="clay"] select.btn { box-shadow: var(--sh-btn); background: var(--panel); }
+:root[data-style="clay"] .search { border-radius: var(--r-sm); }
+
+/* ---------- segmented controls: a recessed track with a raised thumb ---------- */
+:root[data-style="clay"] :is(.seg, .subtabs) { background: var(--clay-well); box-shadow: var(--sh-pressed); border-radius: 14px; padding: 4px; }
+:root[data-style="clay"] .subtabs { border-radius: var(--r-md); }
+:root[data-style="clay"] :is(.seg, .subtabs) button { border-radius: 10px; transition: transform .2s, box-shadow .2s, background .2s, color .2s; }
+:root[data-style="clay"] :is(.seg, .subtabs) button.on { box-shadow: var(--sh-btn); background: var(--accent-soft); }
+:root[data-style="clay"] :is(.seg, .subtabs) button:active { transform: scale(.94); }
+
+/* ---------- things floating over the 3D view ---------- */
+:root[data-style="clay"] :is(.view-tools, .legend, .layer-slider, .play-bar, .progress, .code-panel, .toast, .menu-items, .show-items) {
+  border-color: transparent; background: var(--clay-glass); backdrop-filter: blur(16px); box-shadow: var(--sh-float);
+}
+:root[data-style="clay"] .view-tools { border-radius: var(--r-md); padding: 4px; top: 14px; left: 14px; }
+:root[data-style="clay"] .view-tools button, :root[data-style="clay"] .show-menu summary { border-radius: 11px; transition: transform .2s, background .2s; }
+:root[data-style="clay"] .view-tools button:active { transform: scale(.92); }
+:root[data-style="clay"] .legend { border-radius: var(--r-lg); left: 14px; bottom: 14px; padding: 12px 14px; }
+:root[data-style="clay"] .layer-slider { border-radius: 27px; right: 16px; }
+:root[data-style="clay"] .play-bar { padding: 6px 14px 6px 7px; }
+:root[data-style="clay"] .code-panel { border-radius: var(--r-xl); }
+:root[data-style="clay"] .code { border-radius: var(--r-md); }
+:root[data-style="clay"] .toast { border-radius: var(--r-md); border-left: 4px solid var(--accent); }
+:root[data-style="clay"] .toast.warn { border-left-color: var(--warn); }
+:root[data-style="clay"] .toast.error { border-left-color: var(--error); }
+:root[data-style="clay"] .menu-items, :root[data-style="clay"] .show-items { border-radius: var(--r-lg); }
+:root[data-style="clay"] .menu-item { border-radius: var(--r-sm); }
+:root[data-style="clay"] dialog { border: 0; border-radius: var(--r-xl); box-shadow: var(--sh-float); }
+:root[data-style="clay"] .drop-card { border-radius: var(--r-xl); box-shadow: var(--sh-card); background: var(--clay-glass); backdrop-filter: blur(16px); }
+:root[data-style="clay"] .help-tip { border: 0; border-radius: var(--r-md); background: var(--clay-glass); backdrop-filter: blur(16px); box-shadow: var(--sh-float); }
+
+/* ---------- motion off for people who ask for less ---------- */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-style="clay"] .clay-blobs i { animation: none; }
+  :root[data-style="clay"] * { transition-duration: 0s !important; }
+  :root[data-style="clay"] :is(.btn, .step, .chip, .seg button, .subtabs button, .view-tools button):is(:hover, :active) { transform: none !important; }
+}
