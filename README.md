@@ -2,6 +2,9 @@
 
 A slicer for large-format 3D printing with an industrial robot arm and a pellet extruder.
 
+<img width="2555" height="1406" alt="image" src="https://github.com/user-attachments/assets/f5611b4c-29a4-4562-8899-1447d60a6b63" />
+<img width="2550" height="1405" alt="image" src="https://github.com/user-attachments/assets/990cc2f3-4fd7-4411-9993-5bfbec0bcb4c" />
+
 ## How it works
 
 1. **Prepare**: open a 3D model (STL, OBJ or 3MF), place it on the bed and choose the print settings.
