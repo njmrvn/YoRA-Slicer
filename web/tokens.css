@@ -124,6 +124,9 @@
   --ramp-0: oklch(0.42 0.12 285); --ramp-1: oklch(0.54 0.11 250); --ramp-2: oklch(0.66 0.11 195);
   --ramp-3: oklch(0.77 0.15 145); --ramp-4: oklch(0.88 0.16 105);
 
+  /* move / rotate handles: the usual X red, Y green, Z blue */
+  --axis-x: oklch(0.63 0.20 25); --axis-y: oklch(0.68 0.17 145); --axis-z: oklch(0.62 0.17 255);
+
   /* guides drawn on the model */
   --seam:        oklch(0.72 0.18 330);                     /* magenta: seam points and lines */
   --guide:       oklch(0.80 0.13 85);                      /* slicing planes */

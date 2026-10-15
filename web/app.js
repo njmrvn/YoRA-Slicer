@@ -6,6 +6,7 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { initRobot } from './robot.js';
 import { initPostEditor } from './post.js';
 import { initMaterials } from './material.js';
+import { initGizmo } from './gizmo.js';
 
 const $ = (id) => document.getElementById(id);
 const STORE_KEY = 'yora.settings.v1';
@@ -70,6 +71,7 @@ const app = {
 let robotUI = null;
 let postUI = null;
 let matUI = null;
+let gizmoUI = null;
 
 // ------------------------------------------------------------------ helpers
 function toast(msg, kind = 'info', ms = 6000) {
@@ -371,6 +373,7 @@ async function loadMesh() {
   $('seamPanel').hidden = false;
   updateStrategyViz();
   updateSeamViz();
+  if (gizmoUI) gizmoUI.refresh();
   updateVisibility();
 }
 // ---- help pop-up: rest the pointer on a setting's name for HELP_DELAY_MS (or click the name) to read its help ----
@@ -1231,6 +1234,7 @@ function setMode(m) {
   $('sideExport').hidden = m !== 'export';
   if (m !== 'export') $('codePanel').hidden = true;
   if (robotUI) { if (m === 'robot') robotUI.enter(); else if (was === 'robot') robotUI.leave(); }
+  if (gizmoUI) gizmoUI.refresh();
   if (m === 'export' && postUI) postUI.refresh();
   updateVisibility();
 }
@@ -1307,6 +1311,7 @@ async function boot() {
     mergeValues: (vals) => setValues({ ...app.values, ...vals }) });
   postUI = initPostEditor({ app, $, api, postJSON, toast, persist });
   matUI = initMaterials({ app, $, api, postJSON, toast, setSetting });
+  gizmoUI = initGizmo({ app, view, $, cssColor, setStatusNote, applyTransform, busyTool: () => !!seamTool.mode || planeDrag.active });
   $('layerRange').addEventListener('input', () => { app.cut = null; updateLayers(); });
   $('singleLayer').addEventListener('change', updateLayers);
   $('showPoints').addEventListener('change', updateLayers);
