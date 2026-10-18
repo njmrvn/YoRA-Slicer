@@ -423,3 +423,22 @@ dialog::backdrop { background: var(--scrim); }
 html:root[data-theme="yora"] :is(.seg, .subtabs) button.on { background: var(--accent-strong); color: var(--accent-ink); }
 html:root[data-theme="yora"] .steps .step.active { background: var(--accent-strong); color: var(--accent-ink); border-bottom-color: var(--accent-strong); }
 html:root[data-theme="yora"] .steps .step.active .num { background: var(--accent-ink); color: var(--accent-strong); }
+
+/* Surface pattern card (Preview) */
+.pat-rows { display: grid; gap: 8px; margin-bottom: 8px; }
+.pat-row { display: grid; grid-template-columns: 84px minmax(0, 1fr) 92px; gap: 8px; align-items: center; font-size: 12px; min-width: 0; }
+.pat-row[hidden] { display: none; }
+.pat-row input[type=range] { accent-color: var(--secondary); width: 100%; min-width: 0; }
+.pat-row select { grid-column: 2 / 4; }
+.pat-num { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.pat-num input { width: 100%; min-width: 0; height: 26px; padding: 0 6px; font-variant-numeric: tabular-nums; }
+.pat-num .unit { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+.pat-type { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; margin-bottom: 10px; }
+.pat-row .chk { grid-column: 2 / 4; }
+.pat-image { margin-bottom: 10px; }
+.pat-pic { display: flex; gap: 10px; align-items: center; }
+.pat-pic img { width: 64px; height: 64px; object-fit: contain; background: var(--surface-3); border: 1px solid var(--border); border-radius: 8px; flex: none; }
+.pat-pic-ctl { display: grid; gap: 6px; flex: 1; min-width: 0; }
+.pat-pic-ctl select { width: 100%; min-width: 0; }
+.pat-paint { display: grid; gap: 8px; margin: 4px 0 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.pat-paint .row-btns { flex-wrap: wrap; }

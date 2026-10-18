@@ -7,6 +7,7 @@ import { initRobot } from './robot.js';
 import { initPostEditor } from './post.js';
 import { initMaterials } from './material.js';
 import { initGizmo } from './gizmo.js';
+import { initPattern } from './pattern.js';
 
 const $ = (id) => document.getElementById(id);
 const STORE_KEY = 'yora.settings.v1';
@@ -56,7 +57,7 @@ const KIND_LABELS = { 1: 'Outer wall', 2: 'Inner wall', 3: 'Sparse infill', 4: '
 const FLOATS = 13; // x0 y0 z0 x1 y1 z1 kind level layer speed e_per_mm layer_height move
 // Settings shown with "Essentials" (the rest is one click away under "All")
 const ESSENTIAL = new Set(['layer_height', 'first_layer_height', 'line_width', 'walls', 'top_layers', 'bottom_layers', 'spiral_vase',
-  'brim_loops', 'raft_type', 'raft_offset', 'raft_layers', 'raft_angle', 'seam', 'layer_change', 'ramp_length', 'point_mode', 'point_spacing', 'print_strategy', 'slice_angle', 'slice_direction', 'base_height', 'infill_density', 'infill_pattern', 'outer_wall_speed', 'inner_wall_speed',
+  'brim_loops', 'raft_type', 'raft_offset', 'raft_layers', 'raft_angle', 'seam', 'layer_change', 'ramp_length', 'point_mode', 'point_spacing', 'pattern', 'pattern_amplitude', 'pattern_wavelength', 'pattern_shift', 'print_strategy', 'slice_angle', 'slice_direction', 'base_height', 'infill_density', 'infill_pattern', 'outer_wall_speed', 'inner_wall_speed',
   'infill_speed', 'travel_speed', 'flow', 'nozzle_diameter', 'bed_x', 'bed_y', 'blending', 'extruder_enable_do', 'flow_level_dos',
   'start_delay']);
 
@@ -72,6 +73,7 @@ let robotUI = null;
 let postUI = null;
 let matUI = null;
 let gizmoUI = null;
+let patternUI = null;
 
 // ------------------------------------------------------------------ helpers
 function toast(msg, kind = 'info', ms = 6000) {
@@ -786,22 +788,33 @@ async function applyTransform(useInputs = false, recenter = false) {
 }
 
 // ------------------------------------------------------------------ slicing
-async function slice() {
-  if (!app.model || app.busy) return;
-  busy(true, 'Slicing…');
+// live: a quick update from the Surface pattern card (Preview): no progress overlay, the view and layer stay put,
+// warnings go to the Warnings card only. A request while slicing runs once the current slice is done.
+async function slice(opts = {}) {
+  const live = !!opts.live;
+  if (!app.model) return;
+  if (app.busy) { if (live) app.livePending = true; return; }
+  if (live) { app.busy = true; refreshButtons(); } else busy(true, 'Slicing…');
+  if (patternUI) patternUI.show();
   try {
     await postJSON('/api/slice', { settings: app.values });
     for (;;) {
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, live ? 60 : 250));
       const st = await (await api('/api/status')).json();
-      if (st.state === 'running') { progress(st.progress, `${st.stage === 'planning' ? 'Planning moves' : 'Slicing'}… ${Math.round(st.progress * 100)}%`); continue; }
+      if (st.state === 'running') { if (!live) progress(st.progress, `${st.stage === 'planning' ? 'Planning moves' : 'Slicing'}… ${Math.round(st.progress * 100)}%`); continue; }
       if (st.state === 'error') throw new Error(st.error);
-      if (st.state === 'done') { await showResult(st.result); break; }
+      if (st.state === 'done') { setDirty(false); await showResult(st.result, { live }); break; }
     }
-    setDirty(false);
-  } catch (e) { toast('Slicing failed: ' + e.message, 'error', 10000); } finally { busy(false); refreshButtons(); }
+  } catch (e) { toast('Slicing failed: ' + e.message, 'error', 10000); } finally {
+    if (live) { app.busy = false; refreshButtons(); } else busy(false);
+    refreshButtons();
+    if (patternUI) patternUI.show();
+    if (app.livePending) { app.livePending = false; slice({ live: true }); }
+  }
 }
-async function showResult(res) {
+async function showResult(res, opts = {}) {
+  const live = !!opts.live;
+  const atTop = Number($('layerRange').value) >= Number($('layerRange').max);
   app.result = res;
   const [e, t] = await Promise.all([
     api('/api/toolpath.bin?kind=extrude').then((r) => r.arrayBuffer()),
@@ -809,14 +822,16 @@ async function showResult(res) {
   ]);
   app.ext = new Float32Array(e); app.trv = new Float32Array(t);
   const nl = res.layer_z.length;
+  const keep = live && !atTop ? Number($('layerRange').value) : null;
   $('layerRange').max = Math.max(nl - 1, 0);
-  $('layerRange').value = Math.max(nl - 1, 0);
+  $('layerRange').value = keep !== null ? Math.min(keep, nl - 1) : Math.max(nl - 1, 0);
   buildColors();
   if (app.onToolpathChanged) app.onToolpathChanged();
   setMode(app.mode === 'robot' ? 'robot' : 'preview');
   updateLayers();
   renderLegend();
   renderStats();
+  if (live) return;
   (res.warnings || []).forEach((w) => toast(w, 'warn', 10000));
   setView('iso');
 }
@@ -1235,6 +1250,7 @@ function setMode(m) {
   if (m !== 'export') $('codePanel').hidden = true;
   if (robotUI) { if (m === 'robot') robotUI.enter(); else if (was === 'robot') robotUI.leave(); }
   if (gizmoUI) gizmoUI.refresh();
+  if (patternUI) patternUI.show();
   if (m === 'export' && postUI) postUI.refresh();
   updateVisibility();
 }
@@ -1311,7 +1327,8 @@ async function boot() {
     mergeValues: (vals) => setValues({ ...app.values, ...vals }) });
   postUI = initPostEditor({ app, $, api, postJSON, toast, persist });
   matUI = initMaterials({ app, $, api, postJSON, toast, setSetting });
-  gizmoUI = initGizmo({ app, view, $, cssColor, setStatusNote, applyTransform, busyTool: () => !!seamTool.mode || planeDrag.active });
+  gizmoUI = initGizmo({ app, view, $, cssColor, setStatusNote, applyTransform, busyTool: () => !!seamTool.mode || planeDrag.active || !!patternUI?.painting() });
+  patternUI = initPattern({ app, $, api, toast, setSetting, liveSlice: () => slice({ live: true }), view, palette });
   $('layerRange').addEventListener('input', () => { app.cut = null; updateLayers(); });
   $('singleLayer').addEventListener('change', updateLayers);
   $('showPoints').addEventListener('change', updateLayers);

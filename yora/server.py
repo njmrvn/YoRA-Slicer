@@ -37,6 +37,7 @@ class State:
         self.model = None           # triangles placed on the bed
         self.transform = {'scale': [100, 100, 100], 'rotation': [0, 0, 0], 'center': None}
         self.toolpath = None
+        self.slice_cache = {}       # the last sliced layers (reused when only the surface pattern changes)
         self.job_name = 'Print'
         self.source = None          # 'slice' | 'gcode'
         self.task = {'state': 'idle', 'stage': '', 'progress': 0.0, 'error': None, 'started': 0}
@@ -156,7 +157,7 @@ def run_slice(s):
         with STATE.lock:
             STATE.place(s)
             model = STATE.model
-        tp = slice_to_toolpath(model, s, progress)
+        tp = slice_to_toolpath(model, s, progress, cache=STATE.slice_cache)
         with STATE.lock:
             STATE.toolpath = tp
             STATE.source = 'slice'
@@ -291,6 +292,16 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == '/api/robot/library':
                 from . import robot_file
                 return self.send_json({'files': robot_file.find_robot_files()})
+            if url.path == '/api/patterns':
+                from . import pattern
+                return self.send_json(pattern.list_images())
+            if url.path == '/api/pattern/image':
+                from . import pattern
+                full = pattern.image_path(q.get('name', [''])[0])
+                if not full or not os.path.isfile(full):
+                    return self.fail('Not found', 404)
+                with open(full, 'rb') as f:
+                    return self.send_bytes(f.read(), mimetypes.guess_type(full)[0] or 'application/octet-stream')
             if url.path == '/api/samples':
                 files = sorted(f for f in os.listdir(SAMPLES_DIR)
                                if os.path.splitext(f)[1].lower() in ('.stl', '.obj', '.3mf', '.gcode')) if os.path.isdir(SAMPLES_DIR) else []
@@ -370,6 +381,9 @@ class Handler(BaseHTTPRequestHandler):
                 from . import cell
                 STATE.robot_path = None
                 return self.send_json(cell.import_bundle(self.body()))
+            if url.path == '/api/pattern/image':
+                from . import pattern
+                return self.send_json({'name': pattern.save_image(self.body(), q.get('name', ['picture.png'])[0])})
             if url.path == '/api/robot/tool_upload':
                 from . import tool
                 name, info = tool.save_tool(self.body(), q.get('name', ['tool.stl'])[0])
