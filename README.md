@@ -17,11 +17,23 @@ A slicer for large-format 3D printing with an industrial robot arm and a pellet 
 - Walls, infill, brim, raft and spiral vase
 - Angled layers for printing overhangs without supports
 - Seam control: pick a point or draw a line on the part
+- Surface patterns: waves, spikes, bumps, noise or a picture on the outer wall
 - Even point spacing for smooth robot motion
 - Robot reach, limit and collision checks with a 3D simulation
 - Material library with heating zone temperatures
 - Editable post-processor with start / layer / end events
 - Light, dark and colour themes
+
+## Surface patterns
+
+Add texture to a part without changing the model. After slicing, open the **Surface pattern** card in **Preview**, pick a pattern and move the sliders: the toolpath updates as you go.
+
+- **Sine, zigzag, spikes**: waves along the wall. Shift each layer by half a wave for a woven lattice.
+- **Bumps** and **noise**: rows of domes or a random relief.
+- **Image**: wrap a PNG or JPG (a logo or a texture) around the part.
+- **Paint**: brush the pattern onto just the areas you want, or keep it off them.
+
+<img src="docs/surface-pattern.png" width="640" alt="A vase with a woven sine pattern">
 
 ## Getting started
 
