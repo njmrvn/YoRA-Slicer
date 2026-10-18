@@ -117,6 +117,66 @@ SPEC = [
     ('Point control', 'point_apply', 'Apply to', 'choice', 'walls', {'options': ['walls', 'all'],
         'help': 'walls: walls, brim and spiral vase. all: infill too.'}),
 
+    ('Surface pattern', 'pattern', 'Pattern', 'choice', 'none',
+     {'options': ['none', 'sine', 'zigzag', 'spikes', 'bumps', 'noise', 'image'],
+        'help': 'Relief pressed into the outer wall (and the spiral vase): the nozzle moves in and out along the wall. '
+                'sine: smooth waves. zigzag: straight lines with sharp tips. spikes: sharp spikes with plain wall '
+                'between. bumps: round domes in rows. noise: smooth random relief. image: a picture wrapped round '
+                'the part. Inner walls and infill stay plain.'}),
+    ('Surface pattern', 'pattern_amplitude', 'Depth', 'float', 3, {'unit': 'mm', 'min': 0, 'max': 200,
+        'help': 'How far the wall moves between the bottom and the top of a wave.'}),
+    ('Surface pattern', 'pattern_wavelength', 'Wavelength', 'float', 20, {'unit': 'mm', 'min': 0.5, 'max': 10000,
+        'help': 'Length of one wave along the wall.'}),
+    ('Surface pattern', 'pattern_fit', 'Whole waves per loop', 'bool', True,
+        {'help': 'Adjust the wavelength slightly so every loop holds a whole number of waves and the pattern closes '
+                 'at the seam with no half wave.'}),
+    ('Surface pattern', 'pattern_shift', 'Shift per layer', 'float', 0, {'unit': '% wave', 'min': -100, 'max': 100,
+        'help': 'How far the waves move along the wall on each layer. 0 = stacked waves (vertical ribs). 50 = each '
+                'layer sits between the waves below (lattice / mesh look). Small values twist the ribs.'}),
+    ('Surface pattern', 'pattern_direction', 'Direction', 'choice', 'outward', {'options': ['outward', 'centered', 'inward'],
+        'help': 'outward: the wall only grows (inner walls untouched). centered: half out, half in. inward: the wall '
+                'only cuts in (best with one wall or spiral vase).'}),
+    ('Surface pattern', 'pattern_spike_width', 'Spike / bump width', 'float', 50, {'unit': '%', 'min': 2, 'max': 100,
+        'help': 'spikes: how much of each wave the spike takes up; the rest is plain wall. bumps: dome diameter as a '
+                'share of the wavelength or the row height (the smaller).'}),
+    ('Surface pattern', 'pattern_row_height', 'Row height', 'float', 20, {'unit': 'mm', 'min': 0.5, 'max': 10000,
+        'help': 'bumps: distance between the rows of domes up the wall (Shift per layer then moves each row). '
+                'noise: the size of the relief upwards (Wavelength is the size along the wall).'}),
+    ('Surface pattern', 'pattern_seed', 'Noise variation', 'int', 1, {'min': 0, 'max': 1000000,
+        'help': 'noise: another number gives another random relief.'}),
+    ('Surface pattern', 'pattern_image', 'Picture', 'text', '', {'hidden': True,
+        'help': 'image: the picture file (uploaded in the Surface pattern card, kept in profiles/patterns).'}),
+    ('Surface pattern', 'pattern_image_raise', 'Raised parts', 'choice', 'dark', {'options': ['dark', 'light'],
+        'help': 'image: dark: black parts of the picture stand out (a black logo on white). light: white parts stand out.'}),
+    ('Surface pattern', 'pattern_image_angle', 'Picture centre direction', 'float', -90, {'unit': 'deg', 'min': -360, 'max': 360,
+        'help': 'image: the side of the part where the middle of the picture goes, seen from above. 0 = +X, 90 = +Y '
+                '(rear), -90 = -Y (front).'}),
+    ('Surface pattern', 'pattern_image_span', 'Picture width', 'float', 360, {'unit': 'deg', 'min': 1, 'max': 360,
+        'help': 'image: how far round the part the picture reaches (360 = all the way round). Its height is From '
+                'height to To height (the whole part when both are 0).'}),
+    ('Surface pattern', 'pattern_image_tile', 'Repeat the picture', 'bool', False,
+        {'help': 'image: repeat the picture all the way round, every Picture width degrees.'}),
+    ('Surface pattern', 'pattern_paint_mode', 'Painted areas', 'choice', 'everywhere',
+     {'options': ['everywhere', 'painted', 'unpainted'],
+        'help': 'everywhere: the whole wall. painted: only where you painted on the part (Paint in the Surface pattern '
+                'card). unpainted: everywhere except the painted areas.'}),
+    ('Surface pattern', 'pattern_brush', 'Brush size', 'float', 15, {'unit': 'mm', 'min': 0.5, 'max': 1000,
+        'help': 'Radius of the paint brush; the pattern fades out over the outer third.'}),
+    ('Surface pattern', 'pattern_paint', 'Painted points', 'text', '', {'hidden': True,
+        'help': 'Points x,y,z; ... painted on the part (model position on the bed).'}),
+    ('Surface pattern', 'pattern_points', 'Points per wave', 'int', 12, {'min': 2, 'max': 200,
+        'help': 'Path points in each wave (the sharp tips of zigzag and spikes always get one). More = smoother sine, '
+                'but more robot moves: use corner blending. image: a point every Wavelength / Points per wave mm.'}),
+    ('Surface pattern', 'pattern_z_min', 'From height', 'float', 0, {'unit': 'mm', 'min': 0, 'max': 100000,
+        'help': 'Model height where the pattern starts (below it the wall is plain).'}),
+    ('Surface pattern', 'pattern_z_max', 'To height', 'float', 0, {'unit': 'mm', 'min': 0, 'max': 100000,
+        'help': 'Model height where the pattern ends. 0 = to the top.'}),
+    ('Surface pattern', 'pattern_fade', 'Fade in / out', 'float', 0, {'unit': 'mm', 'min': 0, 'max': 100000,
+        'help': 'The depth grows from 0 over this height above From and shrinks to 0 below To.'}),
+    ('Surface pattern', 'pattern_v_period', 'Vertical wave', 'float', 0, {'unit': 'mm', 'min': 0, 'max': 100000,
+        'help': 'The depth rises and falls with height over this period, giving bands of pattern and plain wall. '
+                '0 = same depth at every height.'}),
+
     ('Infill', 'infill_density', 'Sparse infill density', 'float', 20, {'unit': '%', 'min': 0, 'max': 100}),
     ('Infill', 'infill_pattern', 'Sparse infill pattern', 'choice', 'rectilinear', {'options': ['rectilinear', 'concentric']}),
     ('Infill', 'infill_angle', 'Infill angle', 'float', 45, {'unit': 'deg', 'min': -180, 'max': 180}),

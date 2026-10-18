@@ -8,6 +8,7 @@ from .slicer import (KIND_BRIM, KIND_INFILL, KIND_INNER, KIND_OUTER, KIND_RAFT, 
                      KIND_TRAVEL, KIND_NAMES)
 from .settings import parse_int_list
 from . import points as point_control
+from . import pattern as surface_pattern
 
 EXTRUDING = (KIND_OUTER, KIND_INNER, KIND_INFILL, KIND_SOLID, KIND_BRIM, KIND_RAFT)
 
@@ -60,6 +61,17 @@ class Planner:
         self.ramps = {}          # wall kind -> seam points of loops that ramped on this layer
         self.prev_ramps = {}
         self.next_layer = None
+        self._spiral_u = 0.0     # spiral vase: path length printed so far (surface pattern phase)
+        self._outer = (None, [])  # (layer, its outer wall loops): tells holes from outer boundaries
+        self.pattern_ctx = None   # surface pattern: part centre, picture, paint (pattern.context)
+
+    def _air_sign(self, path, layer):
+        """+1 if the air is outside this CCW outer wall loop (an outer boundary), -1 if inside it (a hole)."""
+        if self._outer[0] is not layer:
+            self._outer = (layer, [p.pts for st in layer.stages for stage in st for p in stage
+                                   if p.kind == KIND_OUTER and p.closed])
+        others = [o for o in self._outer[1] if o is not path.pts]
+        return -1.0 if surface_pattern.is_hole(path.pts, others) else 1.0
 
     def add(self, x, y, z, f, kind, layer):
         self.rows.append((x, y, z, self.e, f, kind, layer))
@@ -240,6 +252,10 @@ class Planner:
         uneven = s['point_mode'] == 'simplify'
         if point_control.active(s, path.kind in (KIND_OUTER, KIND_INNER, KIND_BRIM)):
             loop = point_control.control(loop, s, closed=True)       # points start at the seam
+        seam0 = loop[0].copy()                                         # the seam on the plain wall (pattern moves it)
+        if path.kind == KIND_OUTER and surface_pattern.active(s):
+            loop = surface_pattern.apply(loop, s, True, layer.index, self._air_sign(path, layer),
+                                         model_z=layer.z - layer.height / 2 - layer.shift, ctx=self.pattern_ctx)
         per = float(np.hypot(*np.diff(loop, axis=0).T).sum())
         z = layer.z
         f = self.speed_for(path.kind, layer.index)
@@ -248,11 +264,11 @@ class Planner:
         ramp = (mode in ('ramp', 'scarf') and layer.index > 0 and path.kind in walls and s['ramp_length'] > 0 and per > 1e-6)
         stacked = mode == 'ramp' and s['seam'] in ('aligned', 'custom', 'rear', 'direction', 'path')   # seams of consecutive layers coincide
         w = s['line_width']
-        below = [pl for sp, pl in self.prev_ramps.get(path.kind, []) if np.hypot(*(sp - loop[0])) <= w]
+        below = [pl for sp, pl in self.prev_ramps.get(path.kind, []) if np.hypot(*(sp - seam0)) <= w]
         ramped_below = bool(below)
-        self.seams.setdefault(path.kind, []).append(loop[0].copy())
+        self.seams.setdefault(path.kind, []).append(seam0)
         if ramp:
-            self.ramps.setdefault(path.kind, []).append((loop[0].copy(), loop))
+            self.ramps.setdefault(path.kind, []).append((seam0, loop))
             L = min(s['ramp_length'], 0.9 * per)
             h = layer.height
             continuing = stacked and ramped_below                      # on top of the previous layer's ramp
@@ -306,6 +322,11 @@ class Planner:
                 pts = pts[::-1]
         if point_control.active(self.s, path.kind in (KIND_OUTER, KIND_INNER, KIND_BRIM) or pts.shape[1] == 3):
             pts = point_control.control(pts, self.s, closed=path.closed)
+        if path is layer.spiral and surface_pattern.active(self.s):   # one spiral vase turn
+            plain = pts
+            pts = surface_pattern.apply(pts, self.s, False, layer.index, 1.0, spiral=True, u0=self._spiral_u,
+                                        z_shift=layer.shift, ctx=self.pattern_ctx)
+            self._spiral_u += float(np.hypot(*np.diff(plain[:, :2], axis=0).T).sum())
         z = layer.z
         has_z = pts.shape[1] == 3
         f = self.speed_for(path.kind, layer.index)
@@ -341,6 +362,8 @@ class Planner:
             self.extrude_path(left.pop(idx), layer, epm)
 
     def plan(self, layers):
+        if surface_pattern.active(self.s):
+            self.pattern_ctx = surface_pattern.context(self.s, layers)
         for li, layer in enumerate(layers):
             if self.seams:
                 self.prev_seams, self.seams = self.seams, {}
@@ -417,7 +440,7 @@ def seam_nearest_path(loop, z, P, step=1.0):
 def toolpath_from_rows(rows, layer_z, s, warnings=()):
     a = np.array(rows, dtype=np.float64).reshape(-1, 7)
     tp = Toolpath(a[:, 0], a[:, 1], a[:, 2], a[:, 3], a[:, 4], a[:, 5].astype(np.int8), a[:, 6].astype(np.int32),
-                  list(layer_z), warnings=list(warnings))
+                  list(layer_z), warnings=list(warnings) + surface_pattern.warnings(s))
     analyze(tp, s)
     return tp
 

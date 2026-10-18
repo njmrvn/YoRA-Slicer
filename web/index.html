@@ -202,6 +202,34 @@
         <header class="card-head"><h2>Print summary</h2><span class="head-note" id="summarySource"></span></header>
         <div id="summaryGrid" class="stat-grid"><div class="empty">Slice a model to see the print time, material and flow.</div></div>
       </section>
+      <section class="card" id="patternPanel" hidden>
+        <header class="card-head"><h2>Surface pattern</h2><span class="head-note" id="patState"></span></header>
+        <div class="seg pat-type" id="patType" role="radiogroup" aria-label="Pattern">
+          <button data-pattern="none">None</button><button data-pattern="sine">Sine</button><button data-pattern="zigzag">Zigzag</button><button data-pattern="spikes">Spikes</button><button data-pattern="bumps">Bumps</button><button data-pattern="noise">Noise</button><button data-pattern="image">Image</button>
+        </div>
+        <div id="patImage" class="pat-image" hidden>
+          <div class="pat-pic">
+            <img id="patThumb" alt="" hidden>
+            <div class="pat-pic-ctl">
+              <select id="patPicture" aria-label="Picture"></select>
+              <label class="btn small" title="PNG or JPG. A logo on a white or transparent background works best.">Upload picture…<input type="file" id="patUpload" accept=".png,.jpg,.jpeg,.bmp,image/png,image/jpeg" hidden></label>
+            </div>
+          </div>
+        </div>
+        <div id="patRows" class="pat-rows"></div>
+        <div id="patPaint" class="pat-paint" hidden>
+          <div class="pat-row"><label for="patPaintMode">Where</label><select id="patPaintMode"><option value="everywhere">Everywhere</option><option value="painted">Only painted areas</option><option value="unpainted">Except painted areas</option></select></div>
+          <div class="row-btns">
+            <button id="patPaintBtn" class="btn small" title="Paint on the part where the pattern should go">Paint</button>
+            <button id="patEraseBtn" class="btn small" title="Rub out painted areas">Erase</button>
+            <button id="patPaintUndo" class="btn small" hidden>Undo</button>
+            <button id="patPaintClear" class="btn small" title="Remove all painted areas">Clear</button>
+            <span class="muted small" id="patPaintCount"></span>
+          </div>
+          <div class="muted small" id="patPaintHint"></div>
+        </div>
+        <div class="muted small">The toolpath updates as you change the pattern. More options under Surface pattern in Prepare.</div>
+      </section>
       <section class="card">
         <header class="card-head"><h2>Next</h2></header>
         <div class="next-steps">
