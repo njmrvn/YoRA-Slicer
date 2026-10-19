@@ -490,3 +490,26 @@ def reach_map(robot, s, nx=25, ny=25, z=0.0):
                     break
             grid[j, i] = ok
     return {'nx': nx, 'ny': ny, 'x': xs.tolist(), 'y': ys.tolist(), 'ok': grid.tolist(), 'z': z}
+
+
+def corner_check(robot, s, q_pref=None):
+    """Can the nozzle (pointing down, as when printing, with the free rotation about Z searched) reach the four bed
+    corners at the bed surface and at the full print height? For each of the 8 points: the best joints (closest to
+    q_pref, the start joints by default) and the problems there."""
+    sv = Solver(robot, s)
+    if q_pref is None:
+        pref = parse_float_list(s['start_joints']) if str(s.get('start_joints', '')).strip() else None
+        q_pref = np.array(pref if pref and len(pref) == 6 else robot.home, dtype=float)
+    q_pref = np.asarray(q_pref, dtype=float)
+    out = []
+    for z in (0.0, float(s['bed_z'])):
+        for x, y in ((0.0, 0.0), (s['bed_x'], 0.0), (s['bed_x'], s['bed_y']), (0.0, s['bed_y'])):
+            best = sv.choose_start(float(x), float(y), z, q_pref)
+            if best is None:
+                out.append({'point': [float(x), float(y), z], 'ok': False, 'joints': None, 'problems': ['unreachable']})
+                continue
+            _, q, _, _ = best
+            bits = sv.problems(q) | sv.collision(q)
+            out.append({'point': [float(x), float(y), z], 'ok': bits == 0, 'joints': np.round(q, 4).tolist(),
+                        'problems': [nm for bit, nm in ERR_NAMES.items() if bits & bit]})
+    return out

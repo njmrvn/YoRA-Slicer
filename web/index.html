@@ -34,6 +34,9 @@
 <div class="clay-blobs" aria-hidden="true"><i></i><i></i><i></i></div>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-open" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 4h11l3 3v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z M8 4v5h7V4 M8 20v-6h8v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 7L4 12l5 5M4 12h11a5 5 0 0 1 0 10h-2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-redo" viewBox="0 0 24 24"><path d="M15 7l5 5-5 5M20 12H9a5 5 0 0 0 0 10h2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   <symbol id="i-slice" viewBox="0 0 24 24"><path d="M4 8h16M4 12h16M4 16h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
   <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
@@ -46,13 +49,17 @@
 <header class="topbar">
   <div class="brand"><span class="logo" aria-hidden="true">◆</span><span class="brand-name">YoRA</span><span class="brand-sub">Slicer</span></div>
   <nav class="steps" role="tablist" aria-label="Workflow">
-    <button id="tabPrepare" class="step active" role="tab"><span class="num">1</span>Prepare</button>
-    <button id="tabPreview" class="step" role="tab"><span class="num">2</span>Preview</button>
-    <button id="tabRobot" class="step" role="tab"><span class="num">3</span>Robot</button>
-    <button id="tabExport" class="step" role="tab"><span class="num">4</span>Export</button>
+    <button id="tabSetup" class="step" role="tab" title="The machine: robot, tool, bed and controller"><span class="num">1</span>Setup</button>
+    <button id="tabPrepare" class="step active" role="tab"><span class="num">2</span>Prepare</button>
+    <button id="tabPreview" class="step" role="tab"><span class="num">3</span>Preview</button>
+    <button id="tabRobot" class="step" role="tab" title="Reach, limits, collisions and the simulation"><span class="num">4</span>Robot check</button>
+    <button id="tabExport" class="step" role="tab"><span class="num">5</span>Export</button>
   </nav>
   <div class="actions">
-    <label class="btn ghost" title="STL, OBJ, 3MF or G-code to slice; a .robot robot model file for the robot"><svg class="ic"><use href="#i-open"/></svg>Open<input id="fileInput" type="file" accept=".stl,.obj,.3mf,.gcode,.gco,.g,.nc,.robot" hidden></label>
+    <label class="btn ghost" title="A YoRA project (.yora); STL, OBJ or 3MF to add to the bed; G-code to preview; a .robot robot model file for the robot"><svg class="ic"><use href="#i-open"/></svg>Open<input id="fileInput" type="file" multiple accept=".yora,.stl,.obj,.3mf,.gcode,.gco,.g,.nc,.robot" hidden></label>
+    <button id="btnUndo" class="btn ghost icon-only" disabled aria-label="Undo" title="Undo (Ctrl+Z)"><svg class="ic"><use href="#i-undo"/></svg></button>
+    <button id="btnRedo" class="btn ghost icon-only" disabled aria-label="Redo" title="Redo (Ctrl+Y)"><svg class="ic"><use href="#i-redo"/></svg></button>
+    <button id="btnSaveProject" class="btn ghost" disabled title="Save the project (.yora): the parts, every setting and the files they use. Ctrl+S"><svg class="ic"><use href="#i-save"/></svg>Save</button>
     <select id="sampleSelect" class="btn ghost" aria-label="Open a sample"><option value="">Samples</option></select>
     <button id="btnSlice" class="btn primary" disabled><svg class="ic"><use href="#i-slice"/></svg>Slice</button>
     <details class="menu">
@@ -99,6 +106,7 @@
           <option value="kind">Feature type</option>
           <option value="level">Extruder flow level (DO)</option>
           <option value="speed">Speed</option>
+          <option value="overhang">Overhang angle</option>
         </select>
       </div>
       <div id="legendItems"></div>
@@ -137,10 +145,21 @@
   <aside class="sidebar">
     <!-- 1 · Prepare -->
     <div id="sidePrepare" class="side">
+      <section class="card machine-line" id="machineLine">
+        <div class="machine-text"><span class="muted small">Machine</span><span id="machineText">—</span></div>
+        <button id="btnEditSetup" class="btn small" title="Robot, tool, bed and controller (the Setup step)">Edit setup</button>
+      </section>
       <section class="card" id="objectPanel">
-        <header class="card-head"><h2>Object</h2></header>
+        <header class="card-head"><h2>Parts</h2>
+          <div class="head-actions">
+            <label class="btn small" title="Add a model (STL, OBJ, 3MF) to the bed">Add<input id="addInput" type="file" multiple accept=".stl,.obj,.3mf" hidden></label>
+            <button id="btnDuplicate" class="btn small" disabled title="Put a copy of the selected part on the bed">Duplicate</button>
+            <button id="btnDelete" class="btn small" disabled title="Remove the selected part (Delete key)">Remove</button>
+          </div>
+        </header>
         <div id="objectEmpty" class="empty">No model loaded. Open a file or pick a sample.</div>
         <div id="objectBody" hidden>
+          <div id="partList" class="part-list" role="listbox" aria-label="Parts on the bed"></div>
           <div class="obj-line"><span class="obj-name" id="objName"></span><span class="obj-size" id="objSize"></span></div>
           <div class="grid3">
             <span></span><span class="ax">X</span><span class="ax">Y</span><span class="ax">Z</span>
@@ -244,13 +263,16 @@
     </div>
 
     <!-- 3 · Robot -->
-    <div id="sideRobot" class="side" data-pane="setup" hidden>
+    <!-- 1 · Setup and 4 · Robot check share this sidebar: data-step picks the sub-tabs, data-pane the one shown -->
+    <div id="sideRobot" class="side" data-step="setup" data-pane="setup" hidden>
       <div class="subtabs" role="tablist" aria-label="Robot">
-        <button data-pane="setup" class="on">Setup</button>
-        <button data-pane="jog">Jog</button>
-        <button data-pane="path">Path</button>
-        <button data-pane="check">Check</button>
+        <button data-pane="setup" data-step="setup" class="on">Robot &amp; tool</button>
+        <button data-pane="machine" data-step="setup">Bed &amp; controller</button>
+        <button data-pane="path" data-step="robot">Path</button>
+        <button data-pane="check" data-step="robot">Check</button>
+        <button data-pane="jog" data-step="both">Jog</button>
       </div>
+      <div id="machineForm" class="settings machine-form" data-pane="machine"></div>
       <div id="robotForm" class="settings robot-form"></div>
       <section class="card" data-pane="check">
         <header class="card-head"><h2>Simulation &amp; checks</h2><div class="head-actions"><button id="rbCheck" class="btn primary small">Check robot path</button></div></header>

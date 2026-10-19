@@ -91,6 +91,8 @@ export function initRobot(ctx) {
   view.scene.add(errGroup);
   const reachGroup = new THREE.Group();
   view.scene.add(reachGroup);
+  const cornerGroup = new THREE.Group();     // Setup: the bed corners checked by "Go to bed corners"
+  view.scene.add(cornerGroup);
   armMat.resolution.set(view.renderer.domElement.width, view.renderer.domElement.height);
   new ResizeObserver(() => armMat.resolution.set($('viewport').clientWidth, $('viewport').clientHeight)).observe($('viewport'));
 
@@ -219,7 +221,7 @@ export function initRobot(ctx) {
     const F = R.kin.frames(q);
     group.matrix.copy(bedInv);
     group.matrixWorldNeedsUpdate = true;
-    const inRobot = app.mode === 'robot';
+    const inRobot = app.mode === 'robot' || app.mode === 'setup';
     if (R.hasMesh) {
       group.visible = inRobot; skel.visible = false;
       for (let i = 1; i <= 6; i++) { linkObjs[i].matrix.copy(F[i - 1]); linkObjs[i].matrixWorldNeedsUpdate = true; }
@@ -311,6 +313,7 @@ export function initRobot(ctx) {
     return wrap;
   }
   function setValue(key, v) {
+    app.history?.mark();
     app.values[key] = v;
     persist();
     onRobotSetting(key);
@@ -351,7 +354,12 @@ export function initRobot(ctx) {
         <div class="jog-btns">${['X', 'Y', 'Z', 'Rz'].map((a, i) => `<button class="btn small" data-ax="${[0, 1, 2, 5][i]}" data-dir="-1">${a}−</button><button class="btn small" data-ax="${[0, 1, 2, 5][i]}" data-dir="1">${a}+</button>`).join('')}</div>
       </div>
       <div class="row-btns jog-actions"><button class="btn small" id="rbJogHome">Home</button><button class="btn small" id="rbJogStart">Start joints</button><button class="btn small" id="rbJogSet">Use as start joints</button></div>
-      <div id="rbJogStatus" class="small"></div>`;
+      <div id="rbJogStatus" class="small"></div>
+      <div class="row-btns jog-actions">
+        <button class="btn small" id="rbCorners" title="Move the nozzle (pointing down, as when printing) to the four bed corners at the bed and at the full print height, and show which it can reach">Go to bed corners</button>
+        <button class="btn small" id="rbBedOrigin" title="Put the bed origin (X 0, Y 0, Z 0 of the print) where the nozzle tip is now. The bed keeps its rotation.">Set bed origin here</button>
+      </div>
+      <div id="rbCornerResult" class="small"></div>`;
     box.appendChild(sj);
     // 2. tool, 3. bed frame
     const s2 = section('Tool (TCP at the nozzle tip)', 'rbTool');
@@ -411,6 +419,8 @@ export function initRobot(ctx) {
     sj.querySelectorAll('.jog-btns button').forEach((b) => b.addEventListener('click', () => jogCartesian(Number(b.dataset.ax), Number(b.dataset.dir))));
     $('rbJogHome').addEventListener('click', () => jogTo(R.model?.home));
     $('rbJogStart').addEventListener('click', () => jogTo(startJoints()));
+    $('rbCorners').addEventListener('click', goToCorners);
+    $('rbBedOrigin').addEventListener('click', setBedOriginHere);
     $('rbJogSet').addEventListener('click', () => {
       if (!R.q) return;
       setValue('start_joints', R.q.map((v) => +v.toFixed(3)).join(','));
@@ -668,6 +678,53 @@ export function initRobot(ctx) {
     } catch (e) { toast(e.message, 'error'); } finally { R.jogBusy = false; }
   }
 
+  // Setup: visit the bed corners (bed surface, then full print height) with the nozzle down; mark each corner
+  // green (reachable without problems) or red, and list the problems
+  async function goToCorners() {
+    if (!R.model) return toast('Pick a robot first.', 'warn');
+    stopPlay();
+    cornerGroup.clear();
+    const box = $('rbCornerResult');
+    box.textContent = 'Checking the bed corners…';
+    let res;
+    try { res = await (await postJSON('/api/robot/corners', { settings: app.values, joints: R.q || startJoints() })).json(); } catch (e) { box.textContent = ''; return toast(e.message, 'error'); }
+    const pal = ctx.palette(), r = Math.max(8, (Number(app.values.bed_x) || 1000) / 80);
+    const names = ['front left', 'front right', 'back right', 'back left'];
+    res.corners.forEach((c) => {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 10), new THREE.MeshBasicMaterial({ color: c.ok ? pal.ok : pal.danger, depthTest: false, transparent: true, opacity: 0.85 }));
+      m.position.set(...c.point); m.renderOrder = 15;
+      cornerGroup.add(m);
+    });
+    const bad = res.corners.filter((c) => !c.ok);
+    box.innerHTML = '<div class="corner-list">' + res.corners.map((c, i) => `<span class="${c.ok ? '' : 'bad'}" title="${c.ok ? 'reachable' : c.problems.join(', ')}">` +
+      `${names[i % 4]}<br>${i < 4 ? 'bed' : 'top'}</span>`).join('') + '</div>' +
+      `<div class="${bad.length ? 'bad' : 'muted'}">${bad.length ? `${bad.length} of 8 corners have problems (hover a corner to see which).` : 'All 8 corners can be reached, at the bed and at the full print height.'}</div>`;
+    for (const c of res.corners) {   // show the robot at each corner in turn
+      if (!c.joints) continue;
+      setPose(c.joints.slice());
+      await new Promise((ok) => setTimeout(ok, 650));
+      if (!['setup', 'robot'].includes(app.mode)) break;
+    }
+  }
+  // Setup: the bed origin goes where the nozzle tip is (in the robot base frame); its rotation stays as it is
+  function setBedOriginHere() {
+    if (!R.kin || !R.q) return toast('Pick a robot and jog the nozzle to the bed corner first.', 'warn');
+    const F = R.kin.frames(R.q);
+    const tip = new THREE.Vector3().setFromMatrixPosition(F[6].clone().multiply(cell().tcp));
+    const old = parse6(app.values.bed_frame);
+    const neu = [tip.x, tip.y, tip.z, old[3], old[4], old[5]].map((v) => +v.toFixed(2));
+    const f = (v) => v.slice(0, 3).map((x) => fmt(x, 1)).join(', ');
+    if (!confirm(`Put the bed origin at the nozzle tip?
+
+Bed frame X, Y, Z: ${f(old)}  →  ${f(neu)} mm
+(rotation ${old.slice(3).map((x) => fmt(x, 1)).join(', ')}° stays)`)) return;
+    setValue('bed_frame', neu.join(','));
+    R.pendingJoints = R.q.slice();          // the robot stays where it is while the panel is rebuilt
+    buildPanel();
+    cornerGroup.clear();
+    toast('Bed origin set at the nozzle tip. The print area now starts here.', 'info', 5000);
+  }
+
   // ---------------- reach ----------------
   async function toggleReach() {
     reachGroup.clear();
@@ -882,12 +939,12 @@ export function initRobot(ctx) {
 
   return {
     enter() {
-      errGroup.visible = true; reachGroup.visible = true;
+      errGroup.visible = app.mode === 'robot'; reachGroup.visible = true; cornerGroup.visible = true;
       if (!$('robotForm').childElementCount) buildPanel(); else setPose(R.q || startJoints());
-      $('playBar').hidden = !R.sim;
+      $('playBar').hidden = !R.sim || app.mode !== 'robot';
       if (R.sim && !R.stale) showTime(R.t);
     },
-    leave() { group.visible = false; skel.visible = false; errGroup.visible = false; reachGroup.visible = false; $('playBar').hidden = true; stopPlay(); app.showProgress?.(null); },
+    leave() { group.visible = false; skel.visible = false; errGroup.visible = false; reachGroup.visible = false; cornerGroup.visible = false; $('playBar').hidden = true; stopPlay(); app.showProgress?.(null); },
     rebuild() { if ($('robotForm').childElementCount) buildPanel(); markStale(); },
   };
 }

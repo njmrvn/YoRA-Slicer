@@ -47,7 +47,7 @@ export function initPostEditor(ctx) {
         : rp.summary?.ok ? 'Robot check passed: the program uses its tool rotations and start joints.'
           : 'The robot check found problems with this job. Review the Robot step before running it.';
   }
-  $('postSelect').addEventListener('change', (e) => { app.values.post_name = e.target.value; persist(); showInfo(); });
+  $('postSelect').addEventListener('change', (e) => { app.history?.mark(); app.values.post_name = e.target.value; persist(); showInfo(); });
   $('btnPostEdit').addEventListener('click', () => open(app.values.post_name));
 
   // ---------------- editor window ----------------

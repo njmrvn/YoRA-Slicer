@@ -23,8 +23,26 @@ from . import gcode, mesh, robot, settings
 from .planner import Toolpath
 from .slicer import KIND_RETRACT, KIND_TRAVEL, KIND_NAMES
 from . import slice_to_toolpath, __version__
+from .plate import Plate
 
 WEB_DIR = os.path.join(settings.PROJECT_DIR, 'web')
+CODE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def code_time():
+    """Newest change to the app's Python code. The page is read from disk on every request, the Python code only
+    when the app starts: a later change means this server is older than the page and must be restarted."""
+    try:
+        return max(os.path.getmtime(os.path.join(CODE_DIR, f)) for f in os.listdir(CODE_DIR) if f.endswith('.py'))
+    except (OSError, ValueError):
+        return 0.0
+
+
+STARTED_CODE_TIME = code_time()
+
+
+def code_changed():
+    return code_time() > STARTED_CODE_TIME + 1.0
 OUT_DIR = os.path.join(settings.PROJECT_DIR, 'out')
 SAMPLES_DIR = os.path.join(settings.PROJECT_DIR, 'samples')
 
@@ -32,10 +50,8 @@ SAMPLES_DIR = os.path.join(settings.PROJECT_DIR, 'samples')
 class State:
     def __init__(self):
         self.lock = threading.Lock()
-        self.model_name = None
-        self.model_raw = None       # triangles as loaded
-        self.model = None           # triangles placed on the bed
-        self.transform = {'scale': [100, 100, 100], 'rotation': [0, 0, 0], 'center': None}
+        self.plate = Plate()        # the parts on the bed
+        self.model = None           # all their triangles, placed on the bed
         self.toolpath = None
         self.slice_cache = {}       # the last sliced layers (reused when only the surface pattern changes)
         self.job_name = 'Print'
@@ -47,17 +63,16 @@ class State:
         self.rtask = {'state': 'idle', 'stage': '', 'progress': 0.0, 'error': None}
 
     def place(self, s):
-        t = self.transform
-        center = t['center'] or [s['bed_x'] / 2, s['bed_y'] / 2]
-        self.model = mesh.place(self.model_raw, t['scale'], t['rotation'], center)
+        self.plate.place_all(s)
+        self.model = self.plate.triangles()
+
+    def changed(self, s):
+        """After a part was added, moved or removed: the combined model and its description for the page."""
+        self.model = self.plate.triangles()
+        return {'model': self.plate.info(s)}
 
     def model_info(self, s):
-        if self.model is None:
-            return None
-        lo, hi = mesh.bounds(self.model)
-        fits = bool(lo[0] >= 0 and lo[1] >= 0 and hi[0] <= s['bed_x'] and hi[1] <= s['bed_y'] and hi[2] <= s['bed_z'])
-        return {'name': self.model_name, 'triangles': int(len(self.model)), 'min': lo.tolist(), 'max': hi.tolist(),
-                'size': (hi - lo).tolist(), 'fits': fits, 'transform': self.transform}
+        return self.plate.info(s)
 
 
 STATE = State()
@@ -171,7 +186,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = 'YoRA/' + __version__
 
     def log_message(self, fmt, *args):
-        if '/api/status' not in (args[0] if args else ''):
+        if '/api/status' not in (str(args[0]) if args else ''):
             sys.stderr.write('%s\n' % (fmt % args))
 
     # ---- helpers ----
@@ -214,14 +229,20 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if url.path == '/api/spec':
                 return self.send_json({'spec': settings.spec_json(), 'defaults': settings.DEFAULTS,
-                                       'profiles': settings.list_profiles(), 'version': __version__})
+                                       'profiles': settings.list_profiles(), 'version': __version__,
+                                       'code_changed': code_changed()})
             if url.path == '/api/profile':
                 return self.send_json(settings.load_profile(q.get('name', [''])[0]))
             if url.path == '/api/status':
-                t = dict(STATE.task)
+                t = dict(STATE.task, code_changed=code_changed())
                 if t['state'] == 'done' and STATE.toolpath is not None:
                     t['result'] = result_json(STATE.toolpath)
                 return self.send_json(t)
+            if url.path == '/api/plate':
+                # the parts already on the bed (the page was reloaded while the app kept running)
+                s = settings.normalize(json.loads(q.get('settings', ['{}'])[0]))
+                with STATE.lock:
+                    return self.send_json({'model': STATE.plate.info(s)})
             if url.path == '/api/model.bin':
                 if STATE.model is None:
                     return self.fail('No model loaded', 404)
@@ -229,6 +250,13 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == '/api/toolpath.bin':
                 if STATE.toolpath is None:
                     return self.fail('Nothing sliced yet', 404)
+                if q.get('kind', [''])[0] == 'overhang':   # overhang angle (deg) of each extrusion row, float32
+                    tp = STATE.toolpath
+                    if tp.overhang is None:                # imported G-code: measured on request
+                        from . import overhang
+                        tp.overhang = overhang.angles(tp, settings.normalize({}))
+                    ext_idx, _ = preview_indices(tp)
+                    return self.send_bytes(tp.overhang[ext_idx].astype(np.float32).tobytes(), 'application/octet-stream')
                 return self.send_bytes(preview_buffer(STATE.toolpath, q.get('kind', ['extrude'])[0]), 'application/octet-stream')
             if url.path == '/api/robot/models':
                 from . import kinematics
@@ -333,6 +361,18 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if url.path == '/api/object':
                 return self.post_object()
+            if url.path == '/api/plate/restore':
+                b = self.json_body()
+                s = settings.normalize(b.get('settings'))
+                with STATE.lock:
+                    STATE.plate.restore(b.get('parts') or [], s)
+                    return self.send_json(STATE.changed(s))
+            if url.path in ('/api/object/delete', '/api/object/duplicate', '/api/object/clear'):
+                return self.post_object_action(url.path.rsplit('/', 1)[1])
+            if url.path == '/api/project/save':
+                return self.project_save()
+            if url.path == '/api/project/open':
+                return self.project_open(q)
             if url.path == '/api/slice':
                 return self.post_slice()
             if url.path == '/api/gcode':
@@ -462,6 +502,10 @@ class Handler(BaseHTTPRequestHandler):
             bits = sv.problems(q) | sv.collision(q)
             return self.send_json({'ok': True, 'joints': q.round(4).tolist(), 'tcp': [round(v, 3) for v in robotpath.tcp_bed(model, s, q)],
                                    'problems': [nm for bit, nm in robotpath.ERR_NAMES.items() if bits & bit]})
+        if action == 'corners':
+            # Setup: can the nozzle reach the bed corners, at the bed and at the full print height?
+            model = kinematics.load_robot(s['robot_model'])
+            return self.send_json({'corners': robotpath.corner_check(model, s, b.get('joints'))})
         if action == 'tool_tip':
             from . import tool
             return self.send_json({'tcp': tool.find_nozzle_tip(s)})
@@ -471,35 +515,81 @@ class Handler(BaseHTTPRequestHandler):
         return self.fail('Unknown robot action', 404)
 
     def post_model(self, q):
+        """A model file: added to the bed (replace=1: the bed is cleared first)."""
         name = os.path.basename(q.get('name', ['model.stl'])[0])
         s = settings.normalize(json.loads(q.get('settings', ['{}'])[0]))
         tris = mesh.load_mesh(self.body(), name)
         with STATE.lock:
-            STATE.model_name, STATE.model_raw = name, tris
-            STATE.transform = {'scale': [100, 100, 100], 'rotation': [0, 0, 0], 'center': None}
-            STATE.job_name = robot.safe_name(os.path.splitext(name)[0])
+            if q.get('replace', ['0'])[0] == '1':
+                STATE.plate.clear()
+            if not STATE.plate:
+                STATE.job_name = robot.safe_name(os.path.splitext(name)[0])
+            part = STATE.plate.add(name, tris, s)
             STATE.toolpath = None
             STATE.task = {'state': 'idle', 'stage': '', 'progress': 0.0, 'error': None, 'started': 0}
-            STATE.place(s)
-            return self.send_json({'model': STATE.model_info(s)})
+            return self.send_json(dict(STATE.changed(s), added=part['id']))
 
     def post_object(self):
+        """New scale / rotation / position of one part (id; the first part when no id is given)."""
         b = self.json_body()
         s = settings.normalize(b.get('settings'))
         with STATE.lock:
-            if STATE.model_raw is None:
+            if not STATE.plate:
                 return self.fail('No model loaded')
             t = b.get('transform', {})
-            STATE.transform = {'scale': [float(v) for v in t.get('scale', [100] * 3)],
-                               'rotation': [float(v) for v in t.get('rotation', [0] * 3)],
-                               'center': [float(v) for v in t['center']] if t.get('center') else None}
-            STATE.place(s)
-            return self.send_json({'model': STATE.model_info(s)})
+            transform = {'scale': [float(v) for v in t.get('scale', [100] * 3)],
+                         'rotation': [float(v) for v in t.get('rotation', [0] * 3)],
+                         'center': [float(v) for v in t['center']] if t.get('center') else None}
+            pid = int(b['id']) if b.get('id') is not None else STATE.plate.parts[0]['id']
+            STATE.plate.update(pid, transform, s)
+            return self.send_json(STATE.changed(s))
+
+    def post_object_action(self, action):
+        b = self.json_body()
+        s = settings.normalize(b.get('settings'))
+        with STATE.lock:
+            out = {}
+            if action == 'clear':
+                STATE.plate.clear()
+            elif action == 'delete':
+                STATE.plate.remove(int(b['id']))
+            else:
+                out['added'] = STATE.plate.duplicate(int(b['id']), s)['id']
+            if not STATE.plate:
+                STATE.toolpath = None
+                STATE.task = {'state': 'idle', 'stage': '', 'progress': 0.0, 'error': None, 'started': 0}
+            return self.send_json(dict(STATE.changed(s), **out))
+
+    def project_save(self):
+        from . import project
+        b = self.json_body()
+        s = settings.normalize(b.get('settings'))
+        name = project.safe_name(b.get('name') or STATE.job_name)
+        with STATE.lock:
+            if not STATE.plate:
+                return self.fail('Load a model first')
+            data = project.save(STATE.plate, s, name)
+        return self.send_bytes(data, 'application/zip', filename=name + project.EXT)
+
+    def project_open(self, q):
+        from . import project
+        p = project.load(self.body())
+        s = p['settings']
+        with STATE.lock:
+            STATE.plate.clear(forget=True)
+            for name, raw, transform in p['parts']:
+                STATE.plate.add(name, raw, s, transform)
+            STATE.job_name = robot.safe_name(p['name'])
+            STATE.toolpath = None
+            STATE.slice_cache = {}
+            STATE.task = {'state': 'idle', 'stage': '', 'progress': 0.0, 'error': None, 'started': 0}
+            out = STATE.changed(s)
+        return self.send_json(dict(out, settings=s, name=p['name'], notes=p['notes']))
 
     def post_slice(self):
         b = self.json_body()
         s = settings.normalize(b.get('settings'))
-        if STATE.model_raw is None:
+        if not STATE.plate:
             return self.fail('Load a model first')
         if STATE.task['state'] == 'running':
             return self.fail('Already slicing')
@@ -514,6 +604,8 @@ class Handler(BaseHTTPRequestHandler):
         tp, info = gcode.read_gcode(text, s)
         with STATE.lock:
             STATE.toolpath, STATE.source = tp, 'gcode'
+            STATE.plate.clear(forget=True)            # an imported toolpath replaces the parts
+            STATE.model = None
             STATE.job_name = robot.safe_name(os.path.splitext(name)[0])
             STATE.task = {'state': 'done', 'stage': '', 'progress': 1.0, 'error': None, 'started': time.time()}
         out = result_json(tp)
