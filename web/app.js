@@ -8,10 +8,13 @@ import { initPostEditor } from './post.js';
 import { initMaterials } from './material.js';
 import { initGizmo } from './gizmo.js';
 import { initPattern } from './pattern.js';
+import { initHistory } from './history.js';
 
 const $ = (id) => document.getElementById(id);
 const STORE_KEY = 'yora.settings.v1';
 const NO_RESLICE_GROUPS = new Set(['Robot & bed', 'Extruder I/O']);
+// settings groups of the machine: shown in the Setup step (Bed & controller), not in the Prepare form
+const MACHINE_GROUPS = ['Robot & bed', 'Extruder I/O'];
 // Colours of the 3D view, legend and charts come from the CSS tokens (tokens.css), read at run time. three.js does
 // not understand OKLCH, so cssColor() converts it (OKLCH -> OKLab -> linear sRGB). The palette is read again on
 // every theme change (applyTheme), so nothing is duplicated here.
@@ -137,7 +140,8 @@ function applyTheme() {
   view.scene.background = p.bg.clone();              // flat, no gradient
   view.travelMat.color.setHex(p.travel);
   view.pointsMat.color.setHex(p.points);
-  if (view.mesh) view.mesh.material.color.setHex(p.model);
+  if (view.modelMat) view.modelMat.color.setHex(p.model);
+  if (view.selBox) view.selBox.material.color.copy(cssColor('--accent'));
   buildBed();
   updateStrategyViz();
   if (app.ext) { buildColors(); updateLayers(); renderLegend(); }
@@ -202,7 +206,7 @@ function sceneBounds() {
     b.set(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
   } else if (view.mesh) b.setFromObject(view.mesh);
   else b.set(new THREE.Vector3(0, 0, 0), new THREE.Vector3(app.values.bed_x || 1000, app.values.bed_y || 1000, 100));
-  if (app.mode === 'robot') {
+  if (app.mode === 'robot' || app.mode === 'setup') {
     b.union(new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(app.values.bed_x || 1000, app.values.bed_y || 1000, 0)));
     if (app.robotGroup?.visible) b.union(new THREE.Box3().setFromObject(app.robotGroup));
   }
@@ -225,7 +229,7 @@ function buildForm() {
   form.innerHTML = '';
   const q = ($('settingsSearch')?.value || '').trim().toLowerCase();
   const all = app.detail === 'all' || !!q;
-  const groups = [...new Set(app.spec.map((f) => f.group))].filter((g) => g !== 'Robot cell'); // shown in the Robot step
+  const groups = [...new Set(app.spec.map((f) => f.group))].filter((g) => g !== 'Robot cell' && !MACHINE_GROUPS.includes(g)); // shown in Setup
   let shown = 0;
   groups.forEach((group) => {
     const fields = app.spec.filter((f) => f.group === group && !f.hidden && (all || ESSENTIAL.has(f.key)) &&
@@ -249,6 +253,50 @@ function buildForm() {
     form.appendChild(det);
   });
   if (!shown) form.innerHTML = '<div class="no-results">No setting matches. Try another word, or switch to All.</div>';
+}
+// Setup step, Bed & controller: the program language (the same choice as in Export) and the machine settings groups
+function buildMachineForm() {
+  const box = $('machineForm');
+  if (!box || !app.spec.length) return;
+  box.innerHTML = '';
+  const post = document.createElement('details');
+  post.open = true;
+  post.innerHTML = '<summary>Controller program</summary><div class="fields"><div class="field"><label class="name" for="setupPost">Post-processor' +
+    '<small>The robot program language and events used by Export (Borunte, KUKA, G-code or your own). It can still be changed in Export.</small></label>' +
+    '<div class="ctl"><select id="setupPost"></select></div></div></div>';
+  box.appendChild(post);
+  post.querySelector('.name').classList.add('has-help');
+  $('setupPost').addEventListener('change', (e) => {
+    const sel = $('postSelect');
+    sel.value = e.target.value;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    updateMachineLine();
+  });
+  fillSetupPost();
+  for (const group of MACHINE_GROUPS) {
+    const fields = app.spec.filter((f) => f.group === group && !f.hidden);
+    if (!fields.length) continue;
+    const det = document.createElement('details');
+    det.open = true;
+    det.innerHTML = `<summary>${group === 'Robot & bed' ? 'Bed & controller numbers' : group}</summary><div class="fields"></div>`;
+    fields.forEach((f) => det.querySelector('.fields').appendChild(fieldRow(f)));
+    box.appendChild(det);
+  }
+}
+function fillSetupPost() {
+  const src = $('postSelect'), dst = $('setupPost');
+  if (!src || !dst) return;
+  dst.innerHTML = src.innerHTML;
+  dst.value = app.values.post_name || src.value;
+}
+// the machine the job is sliced for, at the top of Prepare
+function updateMachineLine() {
+  const v = app.values || {};
+  let cell = '';
+  try { cell = localStorage.getItem('yora.cell') || ''; } catch (_) { /* storage blocked */ }
+  const bed = [v.bed_x, v.bed_y, v.bed_z].map((n) => fmt(Number(n) || 0, 0)).join(' × ');
+  const parts = [cell || v.robot_model || 'No robot', `bed ${bed} mm`, v.post_name].filter(Boolean);
+  if ($('machineText')) { $('machineText').textContent = parts.join(' · '); $('machineText').title = parts.join('\n'); }
 }
 function fieldRow(f) {
   const row = document.createElement('div');
@@ -294,6 +342,7 @@ function readInput(f, input) {
 }
 function markChanged(row, f) { row.classList.toggle('changed', app.values[f.key] !== app.defaults[f.key]); }
 function onSetting(f, input) {
+  app.history?.mark();
   let v = readInput(f, input);
   if ((f.type === 'int' || f.type === 'float')) {
     if (!Number.isFinite(v)) v = app.defaults[f.key];
@@ -321,7 +370,7 @@ function restore() { try { return JSON.parse(localStorage.getItem(STORE_KEY) || 
 function setValues(vals) {
   app.values = { ...app.defaults };
   for (const k of Object.keys(app.defaults)) if (vals && k in vals) app.values[k] = vals[k];
-  buildForm(); buildBed(); persist(); updateStrategyViz(); updateSeamViz();
+  buildForm(); buildMachineForm(); buildBed(); persist(); updateStrategyViz(); updateSeamViz(); updateMachineLine();
   if (matUI) matUI.show();
   if (robotUI) robotUI.rebuild();
 }
@@ -333,8 +382,9 @@ function setDirty(d) {
 // ------------------------------------------------------------------ model
 async function openFile(file) {
   const ext = file.name.split('.').pop().toLowerCase();
-  if (ext === 'robot') {   // robot model file: load it as the robot model and show the Robot tab
-    setMode('robot');
+  if (ext === 'yora') return openProject(file);
+  if (ext === 'robot') {   // robot model file: load it as the robot model and show the Setup step
+    setMode('setup');
     return app.loadRobotFile?.(file);
   }
   const isGcode = ['gcode', 'gco', 'g', 'nc'].includes(ext);
@@ -345,33 +395,56 @@ async function openFile(file) {
     if (isGcode) {
       const res = await (await api('/api/gcode?' + q, { method: 'POST', body })).json();
       clearMesh();
-      app.model = null;
+      app.model = null; app.selected = null;
+      app.history?.reset();
       updateObjectPanel();
       $('dropHint').classList.add('hidden');
       await showResult(res);
       const ig = Object.entries(res.import?.ignored || {}).map(([k, v]) => `${k}×${v}`).join(', ');
       toast(`Imported ${file.name}: ${res.stats.layers} layers (layers from ${res.import.layers_from}).${ig ? '\nIgnored: ' + ig : ''}`);
     } else {
-      const res = await (await api('/api/model?' + q, { method: 'POST', body })).json();
+      const first = !app.model;
+      app.history?.mark();
+      app.plateBusy = (app.plateBusy || 0) + 1;
+      let res;
+      try { res = await (await api('/api/model?' + q, { method: 'POST', body })).json(); } finally { app.plateBusy--; }
       app.model = res.model;
+      app.selected = res.added;
       app.result = null; clearToolpath();
       await loadMesh();
       updateObjectPanel();
       $('dropHint').classList.add('hidden');
       setMode('prepare');
-      setView('iso');
-      setStatusNote(`${file.name}: ${res.model.triangles.toLocaleString()} triangles. Set the print settings, then Slice.`);
+      if (first) setView('iso');
+      const added = res.model.parts.find((p) => p.id === res.added);
+      setStatusNote(`${file.name}: ${added.triangles.toLocaleString()} triangles` +
+        (res.model.parts.length > 1 ? `, added as part ${res.model.parts.length}.` : '. Set the print settings, then Slice.'));
     }
   } catch (e) { toast(e.message, 'error'); } finally { busy(false); refreshButtons(); }
 }
+// The parts on the bed: view.mesh is a group with one mesh per part (userData.id), all sharing view.modelMat.
+// view.meshPos holds every vertex (x y z ...) of all parts.
 async function loadMesh() {
   const buf = await (await api('/api/model.bin')).arrayBuffer();
   clearMesh();
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(buf), 3));
-  g.computeVertexNormals();
-  view.mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: palette().model, roughness: 0.55, metalness: 0.05, transparent: true, opacity: 1 }));
+  const all = new Float32Array(buf);
+  view.meshPos = all;
+  if (!view.modelMat) view.modelMat = new THREE.MeshStandardMaterial({ color: palette().model, roughness: 0.55, metalness: 0.05, transparent: true, opacity: 1 });
+  view.mesh = new THREE.Group();
+  view.parts = {};
+  const parts = app.model?.parts || [{ id: 0, start: 0, triangles: all.length / 9 }];
+  for (const p of parts) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(all.slice(p.start * 9, (p.start + p.triangles) * 9), 3));
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, view.modelMat);
+    m.userData.id = p.id;
+    view.parts[p.id] = m;
+    view.mesh.add(m);
+  }
   view.scene.add(view.mesh);
+  if (!parts.some((p) => p.id === app.selected)) app.selected = parts.length ? parts[parts.length - 1].id : null;
+  updateSelection();
   $('seamPanel').hidden = false;
   updateStrategyViz();
   updateSeamViz();
@@ -430,6 +503,7 @@ function setSetting(key, v) {   // through the settings form, so it is saved and
     inp.dispatchEvent(new Event('change', { bubbles: true }));
     return;
   }
+  app.history?.mark();
   app.values[key] = v; persist();
   if (app.result && app.result.source === 'slice') setDirty(true);
   app.hooks.forEach((h) => h(app.spec.find((f) => f.key === key) || { key, group: '' }));
@@ -450,7 +524,7 @@ function updateSeamViz() {
   if ($('seamState')) $('seamState').textContent = seamTool.mode ? '' : label;
   if (!view.mesh) return;
   const col = palette().seam, g = new THREE.Group();
-  const box = new THREE.Box3().setFromBufferAttribute(view.mesh.geometry.attributes.position);
+  const box = new THREE.Box3().setFromObject(view.mesh);
   const r = Math.max(2, box.getSize(new THREE.Vector3()).length() * 0.006);
   const dot = (p) => { const m = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 10), new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true })); m.position.copy(p); m.renderOrder = 9; g.add(m); };
   const line = (pts) => {
@@ -486,8 +560,8 @@ function initSeamTools() {
     const r = el.getBoundingClientRect();
     ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(ndc, view.camera);
-    view.mesh.material.side = THREE.DoubleSide;
-    const h = ray.intersectObject(view.mesh, false)[0];
+    view.modelMat.side = THREE.DoubleSide;
+    const h = ray.intersectObject(view.mesh, true)[0];
     return h ? h.point : null;
   };
   const defaults = { ...view.controls.mouseButtons };
@@ -593,6 +667,7 @@ function initPlaneDrag() {
   el.addEventListener('pointerdown', (ev) => {
     if (ev.button !== 0 || !onHandle(ev)) return;
     planeDrag.active = true;
+    app.history?.mark();
     planeDrag.start = [app.values.slice_angle, app.values.slice_direction];
     view.controls.enabled = false;
     el.setPointerCapture(ev.pointerId);
@@ -620,6 +695,7 @@ function initPlaneDrag() {
     ang = Math.min(80, Math.round(ang / step) * step);
     dir = ang < 0.5 ? app.values.slice_direction : Math.round(dir / step) * step;
     if (ang === app.values.slice_angle && dir === app.values.slice_direction) return;
+    app.history?.mark();
     app.values.slice_angle = ang; app.values.slice_direction = dir;
     if ($('f_slice_angle')) $('f_slice_angle').value = ang;
     if ($('f_slice_direction')) $('f_slice_direction').value = dir;
@@ -686,7 +762,7 @@ function updateStrategyViz(quick = false) {
     view.strategy = null;
   }
   if (!view.mesh || !app.values || app.values.print_strategy !== 'angled') return;
-  const pal = palette(), pos = view.mesh.geometry.attributes.position.array;
+  const pal = palette(), pos = view.meshPos;
   const { u, v, n } = strategyAxes();
   const base = Math.max(Number(app.values.base_height || 0), 0);
   const g = new THREE.Group();
@@ -747,20 +823,64 @@ function updateStrategyViz(quick = false) {
   view.scene.add(g);
   updateVisibility();
 }
-function clearMesh() { if (view.mesh) { view.scene.remove(view.mesh); view.mesh.geometry.dispose(); view.mesh = null; } }
+function clearMesh() {
+  if (view.mesh) { view.scene.remove(view.mesh); view.mesh.children.forEach((m) => m.geometry.dispose()); view.mesh = null; }
+  view.parts = {}; view.meshPos = null;
+  if (view.selBox) { view.scene.remove(view.selBox); view.selBox.geometry.dispose(); view.selBox = null; }
+}
+const selectedPart = () => app.model?.parts?.find((p) => p.id === app.selected) || null;
 function updateObjectPanel() {
   const m = app.model;
   $('objectEmpty').hidden = !!m; $('objectBody').hidden = !m;
-  if (!m) return;
-  $('objName').textContent = m.name;
-  const s = m.size.map((v) => fmt(v, 1)).join(' × ');
-  $('objSize').textContent = `${s} mm` + (m.fits ? '' : '  — outside the print area');
-  $('objSize').classList.toggle('bad', !m.fits);
-  const t = m.transform;
+  $('btnSaveProject').disabled = !m;
+  const part = selectedPart();
+  $('btnDuplicate').disabled = $('btnDelete').disabled = !part;
+  if (!m || !part) return;
+  // the parts on the bed (a list once there is more than one)
+  const list = $('partList');
+  list.innerHTML = '';
+  list.hidden = m.parts.length < 2;
+  m.parts.forEach((p, i) => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'part-row' + (p.id === app.selected ? ' on' : '') + (p.fits ? '' : ' bad');
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', p.id === app.selected);
+    row.innerHTML = '<span class="part-num"></span><span class="part-name"></span><span class="part-size"></span>';
+    row.querySelector('.part-num').textContent = i + 1;
+    row.querySelector('.part-name').textContent = p.name;
+    row.querySelector('.part-size').textContent = p.size.slice(0, 2).map((v) => fmt(v, 0)).join(' × ');
+    row.title = p.fits ? p.name : p.name + ': outside the print area';
+    row.addEventListener('click', () => selectPart(p.id));
+    list.appendChild(row);
+  });
+  $('objName').textContent = part.name;
+  const s = part.size.map((v) => fmt(v, 1)).join(' × ');
+  $('objSize').textContent = `${s} mm` + (part.fits ? '' : '  — outside the print area');
+  $('objSize').classList.toggle('bad', !part.fits);
+  const t = part.transform;
   ['sx', 'sy', 'sz'].forEach((id, i) => { $(id).value = t.scale[i]; });
   ['rx', 'ry', 'rz'].forEach((id, i) => { $(id).value = t.rotation[i]; });
-  $('px').value = fmt((m.min[0] + m.max[0]) / 2, 1).replace(/,/g, '');
-  $('py').value = fmt((m.min[1] + m.max[1]) / 2, 1).replace(/,/g, '');
+  $('px').value = fmt((part.min[0] + part.max[0]) / 2, 1).replace(/,/g, '');
+  $('py').value = fmt((part.min[1] + part.max[1]) / 2, 1).replace(/,/g, '');
+}
+function selectPart(id) {
+  if (id === app.selected || !view.parts?.[id]) return;
+  clearTimeout(transformTimer);
+  app.selected = id;
+  updateSelection();
+  updateObjectPanel();
+  if (gizmoUI) gizmoUI.refresh();
+}
+// a box round the selected part (Prepare, when there is more than one part)
+function updateSelection() {
+  if (view.selBox) { view.scene.remove(view.selBox); view.selBox.geometry.dispose(); view.selBox.material.dispose(); view.selBox = null; }
+  const m = view.parts?.[app.selected];
+  if (!m || (app.model?.parts?.length || 0) < 2) return;
+  view.selBox = new THREE.BoxHelper(m, cssColor('--accent'));
+  view.selBox.material.depthTest = false; view.selBox.material.transparent = true; view.selBox.renderOrder = 7;
+  view.scene.add(view.selBox);
+  view.selBox.visible = app.mode === 'prepare';
 }
 let transformTimer = null;
 function onTransformInput(e) {
@@ -769,10 +889,14 @@ function onTransformInput(e) {
   transformTimer = setTimeout(() => applyTransform(true), 350);
 }
 async function applyTransform(useInputs = false, recenter = false) {
-  if (!app.model) return;
-  const t = app.model.transform;
+  const part = selectedPart();
+  if (!part) return;
+  app.history?.mark();
+  app.plateBusy = (app.plateBusy || 0) + 1;
+  const t = part.transform;
   const body = {
     settings: app.values,
+    id: part.id,
     transform: useInputs ? {
       scale: ['sx', 'sy', 'sz'].map((id) => Number($(id).value) || 100),
       rotation: ['rx', 'ry', 'rz'].map((id) => Number($(id).value) || 0),
@@ -784,7 +908,110 @@ async function applyTransform(useInputs = false, recenter = false) {
     await loadMesh();
     updateObjectPanel();
     if (app.result?.source === 'slice') setDirty(true);
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); } finally { app.plateBusy--; }
+}
+// Duplicate / Remove the selected part
+async function partAction(action) {
+  const part = selectedPart();
+  if (!part) return;
+  app.history?.mark();
+  app.plateBusy = (app.plateBusy || 0) + 1;
+  try {
+    const res = await (await postJSON('/api/object/' + action, { settings: app.values, id: part.id })).json();
+    app.model = res.model;
+    if (res.added) app.selected = res.added;
+    if (!app.model) {
+      clearMesh(); app.selected = null; app.result = null; clearToolpath(); updateObjectPanel(); refreshButtons();
+      $('seamPanel').hidden = true; setMode('prepare'); updateVisibility();
+      setStatusNote('The bed is empty. Open a model or pick a sample.');
+      return;
+    }
+    await loadMesh();
+    updateObjectPanel();
+    if (app.result?.source === 'slice') setDirty(true);
+  } catch (e) { toast(e.message, 'error'); } finally { app.plateBusy--; }
+}
+// Undo / redo puts back a saved state: the settings, then the parts on the bed (the server keeps removed parts)
+async function applyState(st) {
+  const changed = Object.keys(st.values).filter((k) => JSON.stringify(st.values[k]) !== JSON.stringify(app.values[k]));
+  if (changed.length) {
+    setValues(st.values);
+    if (patternUI) patternUI.show();
+    if (app.result?.source === 'slice') setDirty(true);
+  }
+  const cur = (app.model?.parts || []).map((p) => ({ id: p.id, transform: p.transform }));
+  const want = st.parts.map((p) => ({ id: p.id, transform: p.transform }));
+  if (JSON.stringify(cur) !== JSON.stringify(want)) {
+    const res = await (await postJSON('/api/plate/restore', { settings: app.values, parts: want })).json();
+    app.model = res.model;
+    if (!app.model) {
+      clearMesh(); app.selected = null; app.result = null; clearToolpath(); updateObjectPanel(); refreshButtons();
+      setMode('prepare');
+      return;
+    }
+    if (!app.model.parts.some((p) => p.id === app.selected)) app.selected = null;
+    await loadMesh();
+    updateObjectPanel();
+    if (gizmoUI) gizmoUI.refresh();
+    if (app.result?.source === 'slice') setDirty(true);
+  } else if (changed.length && app.mode === 'preview' && app.result?.source === 'slice' &&
+             changed.every((k) => k.startsWith('pattern') || k.startsWith('overhang'))) {
+    slice({ live: true });   // a surface pattern change: the toolpath follows straight away, as it did
+  }
+}
+
+// ------------------------------------------------------------------ project files (.yora)
+// Save: the parts, every setting and the files they use, in one .yora file. Where the browser can (Chrome, Edge),
+// a Save dialog picks the place and Ctrl+S then saves to the same file again; otherwise it is downloaded.
+// Shift+Save or Ctrl+Shift+S always asks for a new place.
+app.projectHandle = null;
+async function saveProject(saveAs = false) {
+  if (!app.model) return toast('Nothing to save: open a model first.', 'warn', 3000);
+  const name = (app.projectName || app.model.parts[0].name).replace(/\.[^.]+$/, '');
+  try {
+    let handle = saveAs ? null : app.projectHandle;
+    if (!handle && window.showSaveFilePicker) {
+      try {
+        handle = await window.showSaveFilePicker({ suggestedName: name + '.yora',
+          types: [{ description: 'YoRA project', accept: { 'application/zip': ['.yora'] } }] });
+      } catch (e) { if (e.name === 'AbortError') return; handle = null; }
+    }
+    busy(true, 'Saving project…');
+    const fileName = handle ? handle.name.replace(/\.yora$/i, '') : name;
+    const r = await postJSON('/api/project/save', { settings: app.values, name: fileName });
+    const blob = await r.blob();
+    if (handle) {
+      const w = await handle.createWritable();
+      await w.write(blob); await w.close();
+      app.projectHandle = handle;
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = fileName + '.yora'; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    }
+    app.projectName = fileName;
+    toast(`Project saved: ${fileName}.yora (${fmt(blob.size / 1048576, 1)} MB)`, 'info', 4000);
+  } catch (e) { toast('Saving failed: ' + e.message, 'error'); } finally { busy(false); }
+}
+async function openProject(file) {
+  busy(true, 'Opening project…');
+  try {
+    const res = await (await api('/api/project/open', { method: 'POST', body: await file.arrayBuffer() })).json();
+    app.projectName = res.name; app.projectHandle = null;
+    app.history?.reset();
+    setValues(res.settings);
+    app.model = res.model; app.selected = null;
+    app.result = null; clearToolpath();
+    await loadMesh();
+    updateObjectPanel();
+    $('dropHint').classList.add('hidden');
+    setMode('prepare');
+    setView('iso');
+    if (matUI && matUI.refresh) await matUI.refresh();
+    const n = res.model.parts.length;
+    setStatusNote(`${res.name}.yora: ${n} part${n > 1 ? 's' : ''}. Slice to see the toolpath.`);
+    (res.notes || []).forEach((note) => toast(note, 'info', 6000));
+  } catch (e) { toast('Opening failed: ' + e.message, 'error', 8000); } finally { busy(false); refreshButtons(); }
 }
 
 // ------------------------------------------------------------------ slicing
@@ -801,6 +1028,7 @@ async function slice(opts = {}) {
     for (;;) {
       await new Promise((r) => setTimeout(r, live ? 60 : 250));
       const st = await (await api('/api/status')).json();
+      if (st.code_changed) warnRestart();
       if (st.state === 'running') { if (!live) progress(st.progress, `${st.stage === 'planning' ? 'Planning moves' : 'Slicing'}… ${Math.round(st.progress * 100)}%`); continue; }
       if (st.state === 'error') throw new Error(st.error);
       if (st.state === 'done') { setDirty(false); await showResult(st.result, { live }); break; }
@@ -813,6 +1041,7 @@ async function slice(opts = {}) {
   }
 }
 async function showResult(res, opts = {}) {
+  app.overhang = null;
   const live = !!opts.live;
   const atTop = Number($('layerRange').value) >= Number($('layerRange').max);
   app.result = res;
@@ -924,9 +1153,25 @@ function levelColor(level, max) {
   const t = max <= 1 ? 1 : (level - 1) / (max - 1);
   return rampColor(t, new THREE.Color());
 }
+// overhang angle (deg) of each extrusion row, loaded when the Overhang colouring is first shown
+async function loadOverhang() {
+  if (app.overhang || app.overhangLoading) return;
+  app.overhangLoading = true;
+  try {
+    app.overhang = new Float32Array(await (await api('/api/toolpath.bin?kind=overhang')).arrayBuffer());
+    buildColors(); updateLayers(); renderLegend();
+  } catch (e) { toast('Overhang: ' + e.message, 'error'); } finally { app.overhangLoading = false; }
+}
+function overhangColor(a, kind, limit, c) {
+  if (kind !== 1 && kind !== 2) return c.copy(palette().kindNone);          // only walls have an overhang angle
+  if (a > limit) return c.setHex(palette().danger);
+  return rampColor(1 - a / Math.max(limit, 1), c);                          // flat on the layer below .. at the limit
+}
 function buildColors() {
   if (!app.ext) return;
   const mode = $('colorMode').value;
+  if (mode === 'overhang' && !app.overhang) loadOverhang();
+  const limit = Number(app.values.overhang_limit) || 45;
   const n = app.ext.length / FLOATS;
   const col = new Float32Array(n * 6);
   const maxL = app.result.stats.flow_max_level || 7;
@@ -938,6 +1183,7 @@ function buildColors() {
     const o = i * FLOATS;
     if (mode === 'kind') c.copy(kindCols[app.ext[o + 6]] || kindCols[3]);
     else if (mode === 'level') c.copy(levelColor(app.ext[o + 7], maxL));
+    else if (mode === 'overhang') { if (app.overhang) overhangColor(app.overhang[i], app.ext[o + 6], limit, c); else c.copy(palette().kindNone); }
     else { const t = smax > smin ? (app.ext[o + 9] - smin) / (smax - smin) : 1; rampColor(t, c); }
     col.set([c.r, c.g, c.b, c.r, c.g, c.b], i * 6);
   }
@@ -1060,8 +1306,8 @@ function updateVisibility() {
   const preview = (app.mode === 'preview' || app.mode === 'robot' || app.mode === 'export') && !!app.result;
   if (view.mesh) {
     view.mesh.visible = !preview || $('showModel').checked;
-    view.mesh.material.opacity = preview ? 0.18 : 1;
-    view.mesh.material.depthWrite = !preview;
+    view.modelMat.opacity = preview ? 0.18 : 1;
+    view.modelMat.depthWrite = !preview;
     view.mesh.position.z = preview && app.result.stats?.raft ? app.result.stats.raft.shift : 0;   // the part sits on its raft
   }
   if (view.extObj) view.extObj.visible = preview;
@@ -1070,6 +1316,7 @@ function updateVisibility() {
   if (view.ptsObj) view.ptsObj.visible = preview;
   if (view.strategy) view.strategy.visible = app.mode === 'prepare' || !app.result;
   if (view.seamViz) view.seamViz.visible = app.mode === 'prepare' || !app.result;
+  if (view.selBox) view.selBox.visible = app.mode === 'prepare';
   if (view.seamPts) view.seamPts.visible = preview;
   $('legend').hidden = !preview;
   $('layerBox').hidden = !preview;
@@ -1095,6 +1342,16 @@ function renderLegend() {
     const unit = app.values.flow_mode === 'rate' ? 'E/s' : 'E/mm';
     const d = document.createElement('div'); d.className = 'muted';
     d.textContent = `Full scale ${fmt(st.flow_full_scale, 2)} ${unit}`;
+    box.appendChild(d);
+  } else if (mode === 'overhang') {
+    const limit = Number(app.values.overhang_limit) || 45, oh = st.overhang;
+    item('var(--danger)', `Past ${fmt(limit, 0)}°`, oh ? `${oh.layers.length} layer${oh.layers.length === 1 ? '' : 's'}` : '');
+    item('var(--ramp-0)', `${fmt(limit, 0)}°`, 'the limit');
+    item('var(--ramp-2)', `${fmt(limit / 2, 0)}°`);
+    item('var(--ramp-4)', '0°', 'on the layer below');
+    item('var(--kind-none)', 'Not a wall');
+    const d = document.createElement('div'); d.className = 'muted';
+    d.textContent = oh ? `Steepest ${fmt(oh.max, 0)}° · limit: Max overhang angle (Material)` : 'Limit: Max overhang angle (Material)';
     box.appendChild(d);
   } else {
     const [a, b] = app.speedRange || [0, 0];
@@ -1126,7 +1383,9 @@ function renderStats() {
     card('Layers', st.layers.toLocaleString(), `${st.moves.toLocaleString()} moves`) +
     card('Path', `${fmt(st.extrude_mm / 1000, 1)} m`, `travel ${fmt((st.travel_mm || 0) / 1000, 1)} m`) +
     card('Peak flow', `${fmt(st.max_volumetric_mm3s, 0)} mm³/s`,
-      `${fmt(st.max_volumetric_mm3s * 3.6 * app.values.density / 1000, 2)} kg/h · ~${st.io_switches_est} flow level changes`, true);
+      `${fmt(st.max_volumetric_mm3s * 3.6 * app.values.density / 1000, 2)} kg/h · ~${st.io_switches_est} flow level changes`, true) +
+    (st.overhang ? card('Steepest overhang', `${fmt(st.overhang.max, 0)}°`,
+      st.overhang.layers.length ? `${st.overhang.layers.length} layer${st.overhang.layers.length === 1 ? '' : 's'} past ${fmt(st.overhang.limit, 0)}°` : `within ${fmt(st.overhang.limit, 0)}°`, true) : '');
   $('summarySource').textContent = app.result.source === 'gcode' ? 'imported G-code' : (app.dirty ? 'settings changed: slice again' : '');
   const warns = app.result.warnings || [];
   $('warnCard').hidden = !warns.length;
@@ -1233,38 +1492,85 @@ function busy(on, text = '') {
 function progress(frac, text) { $('progressBar').style.width = `${Math.round(frac * 100)}%`; $('progressText').textContent = text; }
 function refreshButtons() {
   $('btnSlice').disabled = app.busy || !app.model;
+  $('btnSaveProject').disabled = app.busy || !app.model;
   const has = !!app.result && !app.busy;
   ['btnExportProgram', 'btnPreviewCode', 'btnExportGcode'].forEach((id) => { $(id).disabled = !has; });
   $('tabPreview').disabled = !app.result;
 }
+// Setup and Robot check share the robot sidebar and the robot in the 3D view; each remembers its own sub-tab
+const ROBOT_MODES = ['setup', 'robot'];
+const robotPane = { setup: 'setup', robot: 'check' };
+function setRobotPane(pane) {
+  const side = $('sideRobot');
+  side.dataset.pane = pane;
+  if (ROBOT_MODES.includes(app.mode)) robotPane[app.mode] = pane;
+  side.querySelectorAll('.subtabs button').forEach((x) => x.classList.toggle('on', x.dataset.pane === pane));
+  if (pane === 'machine') { fillSetupPost(); if (postUI) postUI.refresh().then(fillSetupPost); }   // the list is loaded by Export
+}
 function setMode(m) {
   const was = app.mode;
   app.mode = m;
-  for (const [tab, mode] of [['tabPrepare', 'prepare'], ['tabPreview', 'preview'], ['tabRobot', 'robot'], ['tabExport', 'export']]) {
+  for (const [tab, mode] of [['tabSetup', 'setup'], ['tabPrepare', 'prepare'], ['tabPreview', 'preview'], ['tabRobot', 'robot'], ['tabExport', 'export']]) {
     $(tab).classList.toggle('active', m === mode);
   }
   $('sidePrepare').hidden = m !== 'prepare';
   $('sidePreview').hidden = m !== 'preview';
-  $('sideRobot').hidden = m !== 'robot';
+  $('sideRobot').hidden = !ROBOT_MODES.includes(m);
   $('sideExport').hidden = m !== 'export';
+  if (ROBOT_MODES.includes(m)) { $('sideRobot').dataset.step = m; setRobotPane(robotPane[m]); }
+  if (was === 'setup' && m !== 'setup') { try { localStorage.setItem('yora.setupSeen', '1'); } catch (_) { /* storage blocked */ } }
+  if (m === 'prepare') updateMachineLine();
+  // the "drop a model" hint only on an empty Prepare (in Setup it would hide the robot)
+  $('dropHint').classList.toggle('hidden', !!(app.model || app.result) || ROBOT_MODES.includes(m));
   if (m !== 'export') $('codePanel').hidden = true;
-  if (robotUI) { if (m === 'robot') robotUI.enter(); else if (was === 'robot') robotUI.leave(); }
+  if (robotUI) {
+    if (ROBOT_MODES.includes(m)) robotUI.enter();
+    else if (ROBOT_MODES.includes(was)) robotUI.leave();
+  }
   if (gizmoUI) gizmoUI.refresh();
   if (patternUI) patternUI.show();
   if (m === 'export' && postUI) postUI.refresh();
   updateVisibility();
 }
 
+// The app's Python code changed after it started (an update): the page is already new, the server is not, and new
+// options would silently not work. Say so once, and keep the note in the status bar.
+function warnRestart() {
+  if (app.restartWarned) return;
+  app.restartWarned = true;
+  const msg = 'YoRA was updated while it was running. Close this window and start YoRA Slicer.bat again, or new options will not work.';
+  toast(msg, 'warn', 30000);
+  const bar = document.createElement('div');
+  bar.className = 'restart-note';
+  bar.textContent = 'Restart YoRA Slicer.bat to finish the update';
+  document.body.appendChild(bar);
+}
+window.addEventListener('focus', async () => {   // checked again when the window comes back to the front
+  if (app.restartWarned || !app.spec.length) return;
+  try { if ((await (await api('/api/status')).json()).code_changed) warnRestart(); } catch (_) { /* server gone */ }
+});
+
 // ------------------------------------------------------------------ boot
 async function boot() {
   initView();
   const spec = await (await api('/api/spec')).json();
   app.spec = spec.spec; app.defaults = spec.defaults;
+  if (spec.code_changed) warnRestart();
   setValues(restore());
   await loadProfiles();
+  // a reload while the app keeps running: show the parts that are still on the bed
+  try {
+    const plate = await (await api('/api/plate?settings=' + encodeURIComponent(JSON.stringify(app.values)))).json();
+    if (plate.model) {
+      app.model = plate.model;
+      await loadMesh();
+      updateObjectPanel();
+      $('dropHint').classList.add('hidden');
+    }
+  } catch (_) { /* an older server: starts empty */ }
   setView('iso');
 
-  $('fileInput').addEventListener('change', (e) => { if (e.target.files[0]) openFile(e.target.files[0]); e.target.value = ''; });
+  $('fileInput').addEventListener('change', async (e) => { const fs = [...e.target.files]; e.target.value = ''; for (const f of fs) await openFile(f); });
   (await (await api('/api/samples')).json()).forEach((f) => $('sampleSelect').add(new Option(f, f)));
   $('sampleSelect').addEventListener('change', async (e) => {
     const name = e.target.value;
@@ -1278,6 +1584,8 @@ async function boot() {
   $('btnPreviewCode').addEventListener('click', previewCode);
   $('codeClose').addEventListener('click', () => { $('codePanel').hidden = true; });
   $('btnExportGcode').addEventListener('click', exportGcode);
+  $('tabSetup').addEventListener('click', () => setMode('setup'));
+  $('btnEditSetup').addEventListener('click', () => setMode('setup'));
   $('tabPrepare').addEventListener('click', () => setMode('prepare'));
   $('tabPreview').addEventListener('click', () => app.result && setMode('preview'));
   $('tabRobot').addEventListener('click', () => setMode('robot'));
@@ -1294,11 +1602,10 @@ async function boot() {
       buildForm();
     });
   });
-  // robot sub-tabs (Setup / Jog / Path / Check)
-  document.querySelectorAll('#sideRobot .subtabs button').forEach((b) => b.addEventListener('click', () => {
-    $('sideRobot').dataset.pane = b.dataset.pane;
-    document.querySelectorAll('#sideRobot .subtabs button').forEach((x) => x.classList.toggle('on', x === b));
-  }));
+  // robot sub-tabs (Setup: Robot & tool / Bed & controller / Jog; Robot check: Path / Check / Jog)
+  document.querySelectorAll('#sideRobot .subtabs button').forEach((b) => b.addEventListener('click', () => setRobotPane(b.dataset.pane)));
+  app.hooks.push((f) => { if (['robot_model', 'bed_x', 'bed_y', 'bed_z', 'post_name'].includes(f.key)) updateMachineLine(); });
+  app.hooks.push((f) => { if (f.key === 'overhang_limit' && app.ext && $('colorMode').value === 'overhang') { buildColors(); updateLayers(); renderLegend(); } });
   // menu: theme, and the way back to the classic interface
   const theme = (() => { try { return localStorage.getItem('yora.theme') || ''; } catch (_) { return ''; } })();
   document.querySelectorAll('#themeSeg button').forEach((b) => {
@@ -1324,11 +1631,12 @@ async function boot() {
     location.href = '/classic/';
   });
   robotUI = initRobot({ app, view, $, api, palette, cssColor, postJSON, toast, fieldRow, persist, fmt, fmtTime, updateLayers, fitView: () => setView('fit'),
-    mergeValues: (vals) => setValues({ ...app.values, ...vals }) });
+    mergeValues: (vals) => { app.history?.mark(); setValues({ ...app.values, ...vals }); } });
   postUI = initPostEditor({ app, $, api, postJSON, toast, persist });
   matUI = initMaterials({ app, $, api, postJSON, toast, setSetting });
-  gizmoUI = initGizmo({ app, view, $, cssColor, setStatusNote, applyTransform, busyTool: () => !!seamTool.mode || planeDrag.active || !!patternUI?.painting() });
+  gizmoUI = initGizmo({ app, view, $, cssColor, setStatusNote, applyTransform, selectPart, busyTool: () => !!seamTool.mode || planeDrag.active || !!patternUI?.painting() });
   patternUI = initPattern({ app, $, api, toast, setSetting, liveSlice: () => slice({ live: true }), view, palette });
+  app.history = initHistory({ app, $, toast, applyState, toolUndo: () => patternUI.undoStroke() });
   $('layerRange').addEventListener('input', () => { app.cut = null; updateLayers(); });
   $('singleLayer').addEventListener('change', updateLayers);
   $('showPoints').addEventListener('change', updateLayers);
@@ -1344,6 +1652,14 @@ async function boot() {
   $('profileSelect').addEventListener('change', onProfile);
   $('btnSaveProfile').addEventListener('click', saveProfile);
   $('btnCenter').addEventListener('click', () => applyTransform(true, true));
+  $('addInput').addEventListener('change', async (e) => { const fs = [...e.target.files]; e.target.value = ''; for (const f of fs) await openFile(f); });
+  $('btnDuplicate').addEventListener('click', () => partAction('duplicate'));
+  $('btnDelete').addEventListener('click', () => partAction('delete'));
+  $('btnSaveProject').addEventListener('click', (e) => saveProject(e.shiftKey));
+  window.addEventListener('keydown', (ev) => {
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') { ev.preventDefault(); saveProject(ev.shiftKey); return; }
+    if (ev.key === 'Delete' && app.mode === 'prepare' && app.model && !ev.target.matches('input, textarea, select')) partAction('delete');
+  });
   ['sx', 'sy', 'sz', 'rx', 'ry', 'rz', 'px', 'py'].forEach((id) => $(id).addEventListener('input', onTransformInput));
   document.querySelectorAll('.view-tools button').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
   document.querySelectorAll('.show-menu input[data-marker]').forEach((c) => {
@@ -1362,9 +1678,13 @@ async function boot() {
   vp.addEventListener('dragleave', () => { $('dropHint').classList.remove('drag'); if (app.model || app.result) $('dropHint').classList.add('hidden'); });
   vp.addEventListener('drop', (e) => {
     e.preventDefault(); $('dropHint').classList.remove('drag');
-    const f = e.dataTransfer.files[0];
-    if (f) openFile(f);
+    (async () => { for (const f of e.dataTransfer.files) await openFile(f); })();   // several models: all on the bed
   });
   refreshButtons();
+  buildMachineForm();
+  updateMachineLine();
+  let seen = true;
+  try { seen = !!localStorage.getItem('yora.setupSeen'); } catch (_) { /* storage blocked */ }
+  if (!seen) setMode('setup');
 }
 boot().catch((e) => toast('Startup failed: ' + e.message + '\n(The 3D view needs internet access once to load three.js.)', 'error', 20000));

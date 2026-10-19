@@ -34,6 +34,7 @@ class Toolpath:
     part_z0: float = 0.0
     tilt: np.ndarray = None
     orient: np.ndarray = None
+    overhang: np.ndarray = None   # overhang angle (deg) of every move, walls only (overhang.py)
 
     def __len__(self):
         return len(self.x)

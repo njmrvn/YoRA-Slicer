@@ -1,4 +1,4 @@
-// Move / rotate the part with the mouse (Prepare). Double-click the part: arrows move it along X / Y, the square in
+// Move / rotate a part with the mouse (Prepare). A click on a part selects it. Double-click a part: arrows move it along X / Y, the square in
 // the middle moves it freely on the bed, the arcs turn it about Z (on the bed) or tip it about X / Y. The part follows
 // the mouse while dragging; on release the Object panel's position and rotation are set, as if typed. Shift snaps to
 // 10 mm / 15 deg. A click on empty space (or Esc) hides the handles.
@@ -17,7 +17,13 @@ export function initGizmo(ctx) {
     ray.setFromCamera(ndc, view.camera);
     return ray;
   };
-  const hitMesh = (ev) => view.mesh && pick(ev).intersectObject(view.mesh, false).length > 0;
+  // the part under the pointer (its id), or null
+  const hitPart = (ev) => {
+    if (!view.mesh) return null;
+    const h = pick(ev).intersectObject(view.mesh, true)[0];
+    return h ? h.object.userData.id : null;
+  };
+  const target = () => (view.parts && view.parts[app.selected]) || null;
   const hitHandle = (ev) => {
     if (!G.group) return null;
     const h = pick(ev).intersectObjects(G.handles, false)[0];
@@ -30,8 +36,9 @@ export function initGizmo(ctx) {
   }
   function build() {
     clear();
-    if (!view.mesh) return;
-    const box = new THREE.Box3().setFromObject(view.mesh);
+    const m = target();
+    if (!m) return;
+    const box = new THREE.Box3().setFromObject(m);
     const size = box.getSize(new THREE.Vector3());
     G.centre.copy(box.getCenter(new THREE.Vector3()));
     G.base = new THREE.Vector3(G.centre.x, G.centre.y, box.min.z);
@@ -139,12 +146,13 @@ export function initGizmo(ctx) {
   }
   const fmtMm = (v) => `${v > 0 ? '+' : ''}${Math.round(v * 10) / 10} mm`;
   function preview() {   // show the part where it will go: rotate about the pivot, then shift
-    const d = G.drag, m = view.mesh;
+    const d = G.drag, m = target();
     if (!m) return;
     const q = d.kind === 'rot' ? new THREE.Quaternion().setFromAxisAngle(AX[d.axis], d.angle * Math.PI / 180) : new THREE.Quaternion();
     m.quaternion.copy(q);
     m.position.copy(d.pivot).sub(d.pivot.clone().applyQuaternion(q)).add(d.delta);
     if (G.group) { G.group.position.copy(d.delta); }
+    if (view.selBox) view.selBox.update();
   }
   async function endDrag(ev) {
     if (G.drag) moveDrag(ev);                       // the release point counts too
@@ -171,7 +179,9 @@ export function initGizmo(ctx) {
     if (G.active) build();
   }
   function resetPreview() {
-    if (view.mesh) { view.mesh.quaternion.identity(); view.mesh.position.set(0, 0, view.mesh.position.z && app.mode !== 'prepare' ? view.mesh.position.z : 0); }
+    const m = target();
+    if (m) { m.quaternion.identity(); m.position.set(0, 0, 0); }
+    if (view.selBox) view.selBox.update();
     if (G.group) G.group.position.set(0, 0, 0);
   }
 
@@ -179,7 +189,10 @@ export function initGizmo(ctx) {
   let down = null;
   el.addEventListener('dblclick', (ev) => {
     if (app.mode !== 'prepare' || !view.mesh || (ctx.busyTool && ctx.busyTool())) return;
-    if (hitMesh(ev)) show();
+    const id = hitPart(ev);
+    if (id === null) return;
+    ctx.selectPart(id);
+    show();
   });
   el.addEventListener('pointerdown', (ev) => {
     down = [ev.clientX, ev.clientY];
@@ -193,13 +206,17 @@ export function initGizmo(ctx) {
   }, true);
   el.addEventListener('pointerup', (ev) => {
     if (G.drag) { endDrag(ev); return; }
-    // a click (no drag) on empty space hides the handles; a drag turns the view as usual
-    if (G.active && down && Math.hypot(ev.clientX - down[0], ev.clientY - down[1]) < 4 && !hitHandle(ev) && !hitMesh(ev)) hide();
+    // a click (no drag) on a part selects it; on empty space it hides the handles; a drag turns the view as usual
+    if (!down || Math.hypot(ev.clientX - down[0], ev.clientY - down[1]) >= 4 || ev.button !== 0) return;
+    if (app.mode !== 'prepare' || (ctx.busyTool && ctx.busyTool()) || (G.active && hitHandle(ev))) return;
+    const id = hitPart(ev);
+    if (id !== null) ctx.selectPart(id);
+    else if (G.active) hide();
   }, true);
   window.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && G.active && !G.drag) hide(); });
 
   return {
     hide,
-    refresh() { if (G.active) { if (app.mode === 'prepare' && view.mesh) build(); else hide(); } },
+    refresh() { if (G.active) { if (app.mode === 'prepare' && target()) build(); else hide(); } },
   };
 }

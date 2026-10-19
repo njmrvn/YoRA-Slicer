@@ -74,6 +74,11 @@ export function initPattern(ctx) {
     tile.append(el('span'), chk);
     box.appendChild(tile);
     box.appendChild(selectRow('pattern_direction', 'Direction', (spec('pattern_direction').options || ['outward', 'centered', 'inward']).map((o) => [o, o])));
+    // a pattern the running server does not know (it is older than this page) cannot be chosen
+    const known = spec('pattern').options || [];
+    $('patType').querySelectorAll('button').forEach((b) => {
+      if (known.length && !known.includes(b.dataset.pattern)) { b.disabled = true; b.title = 'Restart YoRA Slicer.bat to use this pattern'; }
+    });
     $('patType').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
       change('pattern', b.dataset.pattern, true);
       if (b.dataset.pattern === 'image') loadPictures();
@@ -201,8 +206,8 @@ export function initPattern(ctx) {
       const r = canvas.getBoundingClientRect();
       ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
       ray.setFromCamera(ndc, view.camera);
-      view.mesh.material.side = THREE.DoubleSide;
-      const h = ray.intersectObject(view.mesh, false)[0];
+      view.modelMat.side = THREE.DoubleSide;
+      const h = ray.intersectObject(view.mesh, true)[0];
       return h ? [h.point.x, h.point.y, h.point.z - view.mesh.position.z] : null;   // model position (no raft)
     };
     const setTool = (m) => {
@@ -288,5 +293,7 @@ export function initPattern(ctx) {
   }
 
   app.hooks.push((f) => { if (f.key && f.key.startsWith('pattern')) show(); });
-  return { show, painting: () => !!paint.mode };
+  // Ctrl+Z while painting takes back the last stroke (true = handled)
+  const undoStroke = () => { if (!paint.mode) return false; if (paint.undo.length) { paint.pts = paint.undo.pop(); show(); } return true; };
+  return { show, painting: () => !!paint.mode, undoStroke };
 }

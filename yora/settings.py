@@ -202,6 +202,9 @@ SPEC = [
                                                                'help': 'volumetric: E in mm3 (pellet/FGF). filament: E in mm of filament.'}),
     ('Material', 'filament_diameter', 'Filament diameter', 'float', 1.75, {'unit': 'mm', 'min': 0.5, 'max': 10}),
     ('Material', 'flow', 'Flow multiplier', 'float', 100, {'unit': '%', 'min': 10, 'max': 300}),
+    ('Material', 'overhang_limit', 'Max overhang angle', 'float', 45, {'unit': 'deg', 'min': 0, 'max': 89,
+        'help': 'The steepest overhang (from vertical) this material prints without sagging. Walls past it are '
+                'flagged after slicing; colour the preview by Overhang angle to see them.'}),
     ('Material', 'density', 'Material density', 'float', 1.2, {'unit': 'g/cm3', 'min': 0.1, 'max': 20}),
 
     ('Robot & bed', 'bed_x', 'Print area X', 'float', 1000, {'unit': 'mm', 'min': 10, 'max': 10000}),

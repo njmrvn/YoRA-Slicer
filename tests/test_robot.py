@@ -182,3 +182,19 @@ class FastPathTest(unittest.TestCase):
             tool.TOOLS_DIR = old
             tool._load.cache_clear()
             tool._hull.cache_clear()
+
+
+@unittest.skipUnless(have_model(), 'robot model not imported yet')
+class CornerCheckTest(unittest.TestCase):
+    """Setup: the bed corners at the bed and at full height, nozzle down."""
+
+    def test_small_bed_near_the_robot_is_reachable_and_far_bed_is_not(self):
+        r = K.load_robot(MODEL)
+        near = settings.normalize({'robot_model': MODEL, 'bed_frame': '900,-200,0,0,0,0', 'bed_x': 400, 'bed_y': 400, 'bed_z': 200})
+        res = RP.corner_check(r, near)
+        self.assertEqual(len(res), 8)
+        self.assertEqual([c['point'][2] for c in res], [0.0] * 4 + [200.0] * 4)
+        self.assertTrue(all(c['ok'] for c in res), [c['problems'] for c in res])
+        far = dict(near, bed_frame='6000,0,0,0,0,0')
+        res = RP.corner_check(r, far)
+        self.assertTrue(all(not c['ok'] and 'unreachable' in c['problems'] for c in res))

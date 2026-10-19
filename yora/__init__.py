@@ -12,7 +12,7 @@ __version__ = '0.1.0'
 
 
 # settings that only change the planned moves, not the sliced layers: changing only these reuses the last slice
-PLAN_ONLY_PREFIXES = ('pattern',)
+PLAN_ONLY_PREFIXES = ('pattern', 'overhang')
 
 
 def slice_key(tris, settings):
@@ -24,11 +24,12 @@ def slice_to_toolpath(tris, settings, progress=None, cache=None):
     """Mesh already placed on the bed -> Toolpath. cache: a dict kept between calls; when only plan-only settings
     (the surface pattern) changed since the last call, the sliced layers are reused and only the moves are planned."""
     from .strategy import is_angled, slice_angled
+    from .overhang import annotate
     if is_angled(settings):
         tp = slice_angled(tris, settings, progress)
         if progress:
             progress('planning', 1.0)
-        return tp
+        return annotate(tp, settings)
     key = slice_key(tris, settings) if cache is not None else None
     if cache is not None and cache.get('key') == key:
         result = cache['result']
@@ -42,4 +43,4 @@ def slice_to_toolpath(tris, settings, progress=None, cache=None):
     tp = plan_layers(result, settings)
     if progress:
         progress('planning', 1.0)
-    return tp
+    return annotate(tp, settings)

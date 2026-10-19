@@ -270,9 +270,13 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 #sideRobot > .subtabs, #sideRobot > .robot-form { display: grid; }
 #sideRobot > .subtabs { display: flex; }
 #sideRobot[data-pane="setup"] [data-pane="setup"], #sideRobot[data-pane="jog"] [data-pane="jog"],
-#sideRobot[data-pane="path"] [data-pane="path"], #sideRobot[data-pane="check"] [data-pane="check"] { display: grid; }
+#sideRobot[data-pane="path"] [data-pane="path"], #sideRobot[data-pane="check"] [data-pane="check"],
+#sideRobot[data-pane="machine"] [data-pane="machine"] { display: grid; }
 #sideRobot[data-pane="setup"] details[data-pane="setup"], #sideRobot[data-pane="jog"] details[data-pane="jog"],
-#sideRobot[data-pane="path"] details[data-pane="path"], #sideRobot[data-pane="check"] details[data-pane="check"] { display: block; }
+#sideRobot[data-pane="path"] details[data-pane="path"], #sideRobot[data-pane="check"] details[data-pane="check"],
+#sideRobot[data-pane="machine"] details[data-pane="machine"] { display: block; }
+/* Setup shows its own sub-tabs, Robot check its own; Jog is in both */
+#sideRobot[data-step="setup"] .subtabs [data-step="robot"], #sideRobot[data-step="robot"] .subtabs [data-step="setup"] { display: none !important; }
 .subtabs button[data-pane] { display: block !important; }
 .robot-form { gap: 8px; }
 .robot-form details { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
@@ -442,3 +446,27 @@ html:root[data-theme="yora"] .steps .step.active .num { background: var(--accent
 .pat-pic-ctl select { width: 100%; min-width: 0; }
 .pat-paint { display: grid; gap: 8px; margin: 4px 0 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .pat-paint .row-btns { flex-wrap: wrap; }
+
+/* Parts card (Prepare): the parts on the bed */
+.part-list { display: grid; gap: 2px; margin-bottom: 10px; max-height: 180px; overflow-y: auto; }
+.part-list[hidden] { display: none; }
+.part-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 8px; align-items: center; width: 100%;
+  padding: 5px 8px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--text-2); font: inherit;
+  font-size: 12px; text-align: left; cursor: pointer; }
+.part-row:hover { background: var(--surface-2); }
+.part-row.on { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
+.part-row.bad .part-size { color: var(--danger); }
+.part-num { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.part-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.part-size { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Setup step: the machine settings, and the machine line at the top of Prepare */
+.machine-form { gap: 10px; align-content: start; }
+.machine-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; padding-bottom: 10px; }
+.machine-text { display: grid; gap: 2px; min-width: 0; }
+.machine-text #machineText { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.corner-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; font-size: 11px; }
+.corner-list span { padding: 3px 4px; border-radius: 6px; background: var(--ok-soft); color: var(--ok); text-align: center; }
+.corner-list span.bad { background: var(--danger-soft); color: var(--danger); }
+.restart-note { position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 50; padding: 6px 14px; border-radius: 999px;
+  background: var(--warn); color: var(--bg); font-size: 12px; font-weight: 600; box-shadow: var(--shadow-2); pointer-events: none; }

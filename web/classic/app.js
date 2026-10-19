@@ -246,7 +246,7 @@ async function openFile(file) {
       const ig = Object.entries(res.import?.ignored || {}).map(([k, v]) => `${k}×${v}`).join(', ');
       toast(`Imported ${file.name}: ${res.stats.layers} layers (layers from ${res.import.layers_from}).${ig ? '\nIgnored: ' + ig : ''}`);
     } else {
-      const res = await (await api('/api/model?' + q, { method: 'POST', body })).json();
+      const res = await (await api('/api/model?replace=1&' + q, { method: 'POST', body })).json();
       app.model = res.model;
       app.result = null; clearToolpath();
       await loadMesh();
