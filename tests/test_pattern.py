@@ -205,3 +205,87 @@ def _clusters(v, gap):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def barrel(h=400.0, r_end=200.5, r_belly=233.0, n=360, rows=80):
+    """The barrel table of the report: Ø 401 mm at foot and lip, Ø 466 mm at the belly, 400 mm tall."""
+    zs = np.linspace(0, h, rows + 1)
+    rs = r_end + (r_belly - r_end) * np.sin(math.pi * zs / h)
+    a = np.linspace(0, 2 * math.pi, n + 1)
+    P = lambda r, t, z: [C[0] + r * math.cos(t), C[1] + r * math.sin(t), z]   # noqa: E731
+    tris = []
+    for k in range(rows):
+        for t0, t1 in zip(a[:-1], a[1:]):
+            b0, b1 = P(rs[k], t0, zs[k]), P(rs[k], t1, zs[k])
+            u0, u1 = P(rs[k + 1], t0, zs[k + 1]), P(rs[k + 1], t1, zs[k + 1])
+            tris += [[b0, b1, u1], [b0, u1, u0]]
+    for t0, t1 in zip(a[:-1], a[1:]):
+        tris += [[P(0, 0, h), P(rs[-1], t0, h), P(rs[-1], t1, h)], [P(0, 0, 0), P(rs[0], t1, 0), P(rs[0], t0, 0)]]
+    return np.array(tris, dtype=float)
+
+
+def wave_phase(tp, n):
+    """Per layer: where the waves sit round the part, in waves (0..1): the phase of the N-th harmonic of the radius."""
+    m = tp.kind == KIND_OUTER
+    x, y, L = tp.x[m] - C[0], tp.y[m] - C[1], tp.layer[m]
+    r, th = np.hypot(x, y), np.arctan2(y, x)
+    out = {}
+    for layer in np.unique(L):
+        k = L == layer
+        if k.sum() < 4 * n:
+            continue
+        d = r[k] - r[k].mean()
+        z = np.sum(d * np.exp(-1j * n * th[k]))
+        out[int(layer)] = (np.angle(z) / (2 * math.pi)) % 1.0
+    return out
+
+
+def wrap(v):
+    return (np.asarray(v) + 0.5) % 1.0 - 0.5
+
+
+class PhaseTest(unittest.TestCase):
+    """One wave count per lap for the whole part: the waves stay in phase up a shape whose diameter changes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.model = barrel()
+
+    def job(self, **kw):
+        base = {'layer_height': 3, 'first_layer_height': 3, 'line_width': 5, 'walls': 1, 'infill_density': 0,
+                'top_layers': 0, 'bottom_layers': 2, 'spiral_vase': True, 'pattern': 'sine', 'pattern_amplitude': 2,
+                'pattern_wavelength': 10, 'bed_x': 1000, 'bed_y': 1000}
+        return yora.slice_to_toolpath(self.model, settings.normalize(dict(base, **kw)))
+
+    def test_vertical_ribs_on_the_barrel(self):
+        tp = self.job(pattern_waves=36, pattern_shift=0)
+        self.assertEqual(tp.stats['pattern'][0]['n'], 36)
+        ph = wave_phase(tp, 36)
+        self.assertGreater(len(ph), 100)
+        spread = np.abs(wrap(np.array(list(ph.values())) - list(ph.values())[0]))
+        self.assertLess(spread.max(), 0.05)                                  # same place at foot, belly and lip
+
+    def test_even_diagonal_on_the_barrel(self):
+        tp = self.job(pattern_waves=136, pattern_shift=100 / 6)
+        ph = wave_phase(tp, 136)
+        layers = [k for k in sorted(ph) if k >= 2]                          # the spiral (above the 2 bottom layers)
+        steps = wrap(np.diff([ph[k] for k in layers]) - 1 / 6)              # each layer moves on by 1/6 wave
+        self.assertLess(np.abs(steps).max(), 0.01)
+        m = (tp.kind == KIND_OUTER) & (tp.layer >= 2)
+        r = np.hypot(tp.x[m] - C[0], tp.y[m] - C[1])
+        self.assertLess(np.abs(np.diff(r)).max(), 1.0)                      # no step where the spiral turns join
+
+    def test_wave_count_from_the_wavelength_and_the_report(self):
+        tp = self.job(pattern_wavelength=10)
+        rep = tp.stats['pattern'][0]
+        self.assertTrue(130 <= rep['n'] <= 140)                              # mean perimeter ~1380 mm / 10
+        self.assertLess(rep['wavelength_min'], 10)
+        self.assertGreater(rep['wavelength_max'], 10)
+
+    def test_cylinder_whose_perimeter_is_not_a_multiple(self):
+        # closed loops (no spiral), perimeter 2 pi 97.5 = 612.6 mm, target 40 mm: N = 15, ribs line up
+        tp = job(tube(100, 0, 60), pattern='sine', pattern_wavelength=40, pattern_shift=0)
+        self.assertEqual(tp.stats['pattern'][0]['n'], 15)
+        ph = wave_phase(tp, 15)
+        vals = np.array([ph[k] for k in sorted(ph) if k >= 2])
+        self.assertLess(np.abs(wrap(vals - vals[0])).max(), 0.03)

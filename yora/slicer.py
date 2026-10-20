@@ -354,8 +354,18 @@ class Slicer:
             if len(loops) > 1:
                 self._warn_once('spiral', 'Spiral vase uses only the largest outline; other islands are skipped.')
             target = prev_spiral_end if prev_spiral_end is not None else loop[np.argmax(loop[:, 1])]
-            k = int(np.argmin(np.hypot(*(loop - target[:2]).T)))
-            loop = np.vstack([np.roll(loop, -k, axis=0), np.roll(loop, -k, axis=0)[:1]])
+            # start at the point of the outline nearest the end of the turn below (on a segment, not just the nearest
+            # vertex), so the turns join without a jump
+            a_, b_ = loop, np.roll(loop, -1, axis=0)
+            ab = b_ - a_
+            tt = np.clip(((target[:2] - a_) * ab).sum(1) / np.maximum((ab ** 2).sum(1), 1e-18), 0, 1)
+            q = a_ + tt[:, None] * ab
+            k = int(np.argmin(np.hypot(*(q - target[:2]).T)))
+            if 1e-6 < tt[k] < 1 - 1e-6:
+                loop = np.vstack([q[k][None], np.roll(loop, -(k + 1), axis=0)])
+            else:
+                loop = np.roll(loop, -(k + 1 if tt[k] >= 1 - 1e-6 else k), axis=0)
+            loop = np.vstack([loop, loop[:1]])
             seg = np.hypot(*np.diff(loop, axis=0).T)
             frac = np.concatenate([[0], np.cumsum(seg)]) / max(seg.sum(), 1e-9)
             z0 = z - h

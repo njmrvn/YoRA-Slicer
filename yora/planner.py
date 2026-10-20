@@ -63,6 +63,7 @@ class Planner:
         self.prev_ramps = {}
         self.next_layer = None
         self._spiral_u = 0.0     # spiral vase: path length printed so far (surface pattern phase)
+        self._spiral_state = {}  # spiral vase: lap count carried from turn to turn (surface pattern phase)
         self._outer = (None, [])  # (layer, its outer wall loops): tells holes from outer boundaries
         self.pattern_ctx = None   # surface pattern: part centre, picture, paint (pattern.context)
 
@@ -256,7 +257,8 @@ class Planner:
         seam0 = loop[0].copy()                                         # the seam on the plain wall (pattern moves it)
         if path.kind == KIND_OUTER and surface_pattern.active(s):
             loop = surface_pattern.apply(loop, s, True, layer.index, self._air_sign(path, layer),
-                                         model_z=layer.z - layer.height / 2 - layer.shift, ctx=self.pattern_ctx)
+                                         model_z=layer.z - layer.height / 2 - layer.shift, ctx=self.pattern_ctx,
+                                         key=id(path))
         per = float(np.hypot(*np.diff(loop, axis=0).T).sum())
         z = layer.z
         f = self.speed_for(path.kind, layer.index)
@@ -326,7 +328,8 @@ class Planner:
         if path is layer.spiral and surface_pattern.active(self.s):   # one spiral vase turn
             plain = pts
             pts = surface_pattern.apply(pts, self.s, False, layer.index, 1.0, spiral=True, u0=self._spiral_u,
-                                        z_shift=layer.shift, ctx=self.pattern_ctx)
+                                        z_shift=layer.shift, ctx=self.pattern_ctx, key=id(path),
+                                        spiral_state=self._spiral_state)
             self._spiral_u += float(np.hypot(*np.diff(plain[:, :2], axis=0).T).sum())
         z = layer.z
         has_z = pts.shape[1] == 3
@@ -447,8 +450,11 @@ def toolpath_from_rows(rows, layer_z, s, warnings=()):
 
 
 def plan_layers(slice_result, s):
-    rows = Planner(s).plan(slice_result.layers)
+    planner = Planner(s)
+    rows = planner.plan(slice_result.layers)
     tp = toolpath_from_rows(rows, [l.z for l in slice_result.layers], s, slice_result.warnings)
+    if planner.pattern_ctx and planner.pattern_ctx.get('report'):
+        tp.stats['pattern'] = planner.pattern_ctx['report']
     if slice_result.raft:
         tp.stats['raft'] = slice_result.raft
     return tp

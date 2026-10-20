@@ -6,9 +6,14 @@ every point is moved sideways, perpendicular to the wall, towards the air, by
 
     offset = depth * height factor * paint mask * (pattern(point) - base)
 
-pattern() is 0..1. tau counts waves along the wall: tau = u / wavelength + phase, with u the XY distance from the loop
-start (the seam). With 'fit' the wavelength is adjusted so each loop holds a whole number of waves and the pattern
-closes at the seam.
+pattern() is 0..1. tau counts waves along the wall. With 'fit' (Whole waves per lap, the default) the outline is
+followed up the part as a stack (same centre, similar perimeter, layer after layer) and the stack gets ONE whole wave
+count N for its full height: N = round(mean perimeter / wavelength), or Waves per lap. On each lap
+    closed loop:  tau = N * f + shift * layer
+    spiral turn:  tau = (N + shift) * lambda,   lambda = layer + f   (continuous along the spiral: no step)
+with f the fraction of the lap measured from a fixed direction (+X from the stack centre), not from the seam. The
+effective wavelength (lap perimeter / N) follows the shape, so waves stay in phase from layer to layer whatever the
+diameter: ribs stay vertical and diagonals keep their angle. Without fit: tau = distance / wavelength.
 
     sine     0.5 - 0.5 cos(2 pi f)                     f = wave fraction; the phase moves by the shift on every layer
     zigzag   triangle, sharp tip at mid-wave           (0 = stacked ribs, 50 % = lattice / mesh look)
@@ -248,9 +253,82 @@ def paint_mask(s, P, x, y, z):
 
 
 # ------------------------------------------------------------------ applying it to a path
+def _outlines(layer):
+    """The outer wall loops of a layer (outer boundaries and holes) and its spiral vase turn."""
+    out = [layer.spiral] if layer.spiral is not None else []
+    out += [p for st in layer.stages for stage in st for p in stage if p.kind == 1 and p.closed]   # KIND_OUTER
+    return out
+
+
+def stacks(s, layers):
+    """Follow each outline up the part: a loop joins the stack of the layer below whose centre is within half its
+    radius and whose perimeter is within 30 %. Each stack gets one wave count N. Returns ({id(path): {n, center}},
+    report: per stack N, its effective wavelength range and number of layers, largest first)."""
+    lam = max(float(s['pattern_wavelength']), 1e-6)
+    found = []
+    for li, layer in enumerate(layers):
+        for p in _outlines(layer):
+            xy = p.pts[:, :2]
+            ring = np.vstack([xy, xy[:1]]) if p.closed else xy
+            L = float(np.hypot(*np.diff(ring, axis=0).T).sum())
+            if L < 1e-6:
+                continue
+            c, r = xy.mean(0), L / (2 * math.pi)
+            best, score = None, None
+            for st in found:
+                if st['taken'] == li or st['last'] < li - 2:
+                    continue
+                ratio = L / st['L']
+                d = float(np.hypot(*(c - st['c'])))
+                if not 0.7 < ratio < 1 / 0.7 or d > 0.5 * r:
+                    continue
+                sc = d / r + abs(math.log(ratio))
+                if score is None or sc < score:
+                    best, score = st, sc
+            if best is None:
+                best = {'Ls': [], 'cs': [], 'paths': []}
+                found.append(best)
+            best.update(c=c, L=L, last=li, taken=li)
+            best['Ls'].append(L); best['cs'].append(c); best['paths'].append(id(p))
+    if not found:
+        return {}, []
+    mean = [float(np.mean(st['Ls'])) for st in found]
+    main = int(np.argmax([m * len(st['Ls']) for m, st in zip(mean, found)]))
+    waves = int(s.get('pattern_waves', 0) or 0)
+    loops, report = {}, []
+    for st, m in zip(found, mean):
+        n = max(1, int(round(waves * m / mean[main]))) if waves > 0 else max(1, int(round(m / lam)))
+        center = tuple(np.mean(st['cs'], axis=0))
+        for pid in st['paths']:
+            loops[pid] = {'n': n, 'center': center}
+        report.append({'n': n, 'wavelength_min': min(st['Ls']) / n, 'wavelength_max': max(st['Ls']) / n,
+                       'layers': len(st['Ls']), 'perimeter': m})
+    report.sort(key=lambda r: -r['perimeter'] * r['layers'])
+    return loops, report
+
+
+def lap_start(pts, cum, center):
+    """Arc length where the path crosses the +X direction from the centre (where the lap fraction is 0);
+    0 when it does not cross it."""
+    a = np.arctan2(pts[:, 1] - center[1], pts[:, 0] - center[0])
+    a0, a1 = a[:-1], a[1:]
+    right = (pts[:-1, 0] > center[0]) | (pts[1:, 0] > center[0])
+    up = right & (a0 <= 0) & (a1 > 0) & (a1 - a0 < math.pi)       # counter-clockwise crossing
+    down = right & (a0 > 0) & (a1 <= 0) & (a0 - a1 < math.pi)     # clockwise
+    hit = np.nonzero(up | down)[0]
+    if not len(hit):
+        return 0.0
+    i = int(hit[0])
+    t = -a0[i] / (a1[i] - a0[i]) if a1[i] != a0[i] else 0.0
+    return float(cum[i] + t * (cum[i + 1] - cum[i]))
+
+
 def context(s, layers):
-    """What the pattern needs to know about the whole part: centre (picture wrap), top height, picture, paint."""
-    ctx = {'center': (0.0, 0.0), 'ztop': 0.0, 'image': None, 'paint': None}
+    """What the pattern needs to know about the whole part: centre (picture wrap), top height, picture, paint,
+    and the wave count of every outline (stacks)."""
+    ctx = {'center': (0.0, 0.0), 'ztop': 0.0, 'image': None, 'paint': None, 'loops': {}, 'report': []}
+    if s.get('pattern_fit', True) and s.get('pattern') != 'image':
+        ctx['loops'], ctx['report'] = stacks(s, layers)
     lo, hi, top = np.array([np.inf, np.inf]), np.array([-np.inf, -np.inf]), 0.0
     for l in layers:
         top = max(top, l.z - l.shift)
@@ -303,13 +381,16 @@ def sample_positions(cum, a, b, n_per_wave, corners, keep):
     return u
 
 
-def apply(pts, s, closed, layer_index, air_sign=1.0, model_z=None, spiral=False, u0=0.0, z_shift=0.0, ctx=None):
+def apply(pts, s, closed, layer_index, air_sign=1.0, model_z=None, spiral=False, u0=0.0, z_shift=0.0, ctx=None, key=None,
+          spiral_state=None):
     """Pattern one path. pts: (n, 2|3), closed loops with the first point repeated at the end (start = seam).
     air_sign: +1 when the air is on the right of the direction of travel (outer boundary of a CCW loop), -1 for a
     hole. model_z: model height of a flat path. (n, 3) paths carry their own Z: model height = Z - z_shift (a layer
     lifted onto a raft). spiral: an open spiral turn that continues into the next one (phase grows along it).
     u0: distance already printed along the spiral before this turn (used when the wavelength is not fitted).
-    ctx: context() of the whole part (picture centre, paint); None = worked out from this path.
+    ctx: context() of the whole part (picture centre, paint, wave counts); None = worked out from this path.
+    key: id() of the slicer's Path, to find its stack (wave count) in ctx. spiral_state: a dict kept from turn to
+    turn of a spiral vase: the lap count goes on from turn to turn, so the turns join without a step.
     Returns the new (m, 2|3) path."""
     pts = np.asarray(pts, dtype=float)
     if not active(s) or len(pts) < 3:
@@ -328,10 +409,26 @@ def apply(pts, s, closed, layer_index, air_sign=1.0, model_z=None, spiral=False,
     if L < 1e-6:
         return pts
     period = None
-    if s.get('pattern_fit', True) and (closed or spiral):
-        n = max(int(round(L / lam)), 1)
-        period = n
-        if spiral:   # phase grows by the shift over the turn, so it meets the next turn exactly
+    stack = (ctx.get('loops') or {}).get(key) if key is not None else None
+    if s.get('pattern_fit', True) and stack:
+        # one wave count for the whole stack; the lap fraction counts from the +X direction of its centre
+        n = period = stack['n']
+        u_ref = lap_start(pts, cum, stack['center'])
+        if spiral:   # tau = (N + shift) * laps: the lap count goes on from turn to turn
+            # where this turn starts, in laps, from the geometry (its +X crossing); the lap count carried from the
+            # turn before only picks the whole lap, so the turns join and the waves stay over each other
+            state = spiral_state if spiral_state is not None else {}
+            lap0 = layer_index - u_ref / L
+            if 'lap' in state:
+                lap0 += round(state['lap'] - lap0)
+            state['lap'] = lap0 + 1.0
+            k = n + layer_shift
+            a, b = k / L, k * lap0
+        else:
+            a, b = n / L, layer_shift * layer_index - n * u_ref / L
+    elif s.get('pattern_fit', True) and (closed or spiral):   # no stack known (a single path): whole waves on it
+        n = period = max(int(round(L / lam)), 1)
+        if spiral:
             a, b = (n + layer_shift) / L, layer_shift * layer_index
         else:
             a, b = n / L, layer_shift * layer_index
