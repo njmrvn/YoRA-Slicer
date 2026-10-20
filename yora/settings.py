@@ -127,9 +127,13 @@ SPEC = [
         'help': 'How far the wall moves between the bottom and the top of a wave.'}),
     ('Surface pattern', 'pattern_wavelength', 'Wavelength', 'float', 20, {'unit': 'mm', 'min': 0.5, 'max': 10000,
         'help': 'Length of one wave along the wall.'}),
-    ('Surface pattern', 'pattern_fit', 'Whole waves per loop', 'bool', True,
-        {'help': 'Adjust the wavelength slightly so every loop holds a whole number of waves and the pattern closes '
-                 'at the seam with no half wave.'}),
+    ('Surface pattern', 'pattern_fit', 'Whole waves per lap', 'bool', True,
+        {'help': 'One whole number of waves per lap for the full height of the part (each outline gets its own), so '
+                 'the waves line up layer after layer: ribs stay vertical and diagonals keep their angle. The '
+                 'wavelength stretches a little where the part is wider. Off: a fixed wavelength in mm.'}),
+    ('Surface pattern', 'pattern_waves', 'Waves per lap', 'int', 0, {'min': 0, 'max': 100000,
+        'help': 'The number of waves round the part. 0 = from the wavelength (mean perimeter / wavelength). The '
+                'chosen number and the wavelength it gives are shown in the Surface pattern card after slicing.'}),
     ('Surface pattern', 'pattern_shift', 'Shift per layer', 'float', 0, {'unit': '% wave', 'min': -100, 'max': 100,
         'help': 'How far the waves move along the wall on each layer. 0 = stacked waves (vertical ribs). 50 = each '
                 'layer sits between the waves below (lattice / mesh look). Small values twist the ribs.'}),

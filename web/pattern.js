@@ -9,6 +9,7 @@ export function initPattern(ctx) {
   const ROWS = [
     ['pattern_amplitude', 'Depth', 0, 20, 0.1, null],
     ['pattern_wavelength', { image: 'Detail' }, 2, 200, 1, null],
+    ['pattern_waves', 'Waves / lap', 0, 400, 1, [...WAVES, 'bumps', 'noise']],
     ['pattern_shift', { bumps: 'Shift / row' }, 0, 100, 5, [...WAVES, 'bumps']],
     ['pattern_spike_width', { bumps: 'Bump width' }, 2, 100, 1, ['spikes', 'bumps']],
     ['pattern_row_height', 'Row height', 2, 200, 1, ['bumps', 'noise']],
@@ -154,6 +155,17 @@ export function initPattern(ctx) {
     $('patPaintHint').textContent = paint.mode ? HINTS[paint.mode]
       : (v.pattern_paint_mode !== 'everywhere' && !n ? 'Press Paint, then paint on the part.' : '');
     $('patState').textContent = app.busy ? 'updating…' : '';
+    // the wave count chosen for each outline and the wavelength it gives (from the last slice)
+    const rep = app.result?.stats?.pattern || [];
+    const info = $('patWaves');
+    info.hidden = !on || kind === 'image' || !rep.length;
+    if (!info.hidden) {
+      const f = (v) => (Math.round(v * 10) / 10).toString();
+      const main = rep[0];
+      info.textContent = `${main.n} waves per lap · wavelength ${f(main.wavelength_min)}–${f(main.wavelength_max)} mm` +
+        (rep.length > 1 ? ` · ${rep.length - 1} more outline${rep.length > 2 ? 's' : ''} (holes, other parts) with their own count` : '');
+      info.title = rep.map((r, i) => `${i ? 'Outline ' + (i + 1) : 'Main outline'}: ${r.n} waves, ${f(r.wavelength_min)}–${f(r.wavelength_max)} mm, ${r.layers} layers`).join(String.fromCharCode(10));
+    }
   }
 
   // ---------------------------------------------------------------- painting on the part

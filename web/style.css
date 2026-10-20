@@ -444,6 +444,7 @@ html:root[data-theme="yora"] .steps .step.active .num { background: var(--accent
 .pat-pic img { width: 64px; height: 64px; object-fit: contain; background: var(--surface-3); border: 1px solid var(--border); border-radius: 8px; flex: none; }
 .pat-pic-ctl { display: grid; gap: 6px; flex: 1; min-width: 0; }
 .pat-pic-ctl select { width: 100%; min-width: 0; }
+.pat-waves { margin: -2px 0 8px; font-variant-numeric: tabular-nums; }
 .pat-paint { display: grid; gap: 8px; margin: 4px 0 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .pat-paint .row-btns { flex-wrap: wrap; }
 
