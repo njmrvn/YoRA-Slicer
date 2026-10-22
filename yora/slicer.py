@@ -449,7 +449,33 @@ class Slicer:
                 del self._masks[j]
                 self._outlines.pop(j, None)
             self.progress('slicing', (i + 1) / max(n, 1))
+        smooth_spiral(layers, self.s['line_width'])
         return SliceResult(layers, self.grid.res, self.warnings)
+
+
+def smooth_spiral(layers, w):
+    """Spiral vase: each turn follows the outline of its own layer, so where the wall leans the next turn starts a
+    little further out (or in) and the path steps sideways at every join. Blend each turn, by lap fraction, from its
+    own outline into the next layer's: it then ends exactly where the next turn starts and the wall rises smoothly.
+    Turns whose next outline is very different (another length, or starting far away) are left as they are."""
+    for a_layer, b_layer in zip(layers[:-1], layers[1:]):
+        A, B = a_layer.spiral, b_layer.spiral
+        if A is None or B is None or len(A.pts) < 3 or len(B.pts) < 3:
+            continue
+        a, b = A.pts, B.pts
+        la = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(a[:, :2], axis=0).T))])
+        lb = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(b[:, :2], axis=0).T))])
+        if la[-1] < 1e-6 or lb[-1] < 1e-6 or not 0.7 < lb[-1] / la[-1] < 1 / 0.7:
+            continue
+        if np.hypot(*(a[-1, :2] - b[0, :2])) > 2 * w:
+            continue
+        fa, fb = la / la[-1], lb / lb[-1]
+        f = np.unique(np.concatenate([fa, fb]))
+        pa = np.column_stack([np.interp(f, fa, a[:, 0]), np.interp(f, fa, a[:, 1])])
+        pb = np.column_stack([np.interp(f, fb, b[:, 0]), np.interp(f, fb, b[:, 1])])
+        xy = (1 - f)[:, None] * pa + f[:, None] * pb
+        z = np.interp(f, fa, a[:, 2])
+        a_layer.spiral = Path(A.kind, np.column_stack([xy, z]), A.closed)
 
 
 def forward_only(pts, raw):

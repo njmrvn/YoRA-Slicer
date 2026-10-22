@@ -111,8 +111,13 @@ function initView() {
   view.renderer.setPixelRatio(window.devicePixelRatio);
   host.prepend(view.renderer.domElement);
   view.scene = new THREE.Scene();
-  view.camera = new THREE.PerspectiveCamera(40, 1, 1, 100000);
-  view.camera.up.set(0, 0, 1);
+  // two cameras, perspective and orthographic (no vanishing point: true sizes, parallel lines stay parallel);
+  // view.camera is the one in use, switched with the Persp / Ortho button
+  view.persp = new THREE.PerspectiveCamera(40, 1, 1, 100000);
+  view.ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 100000);
+  view.orthoHalf = 500;                              // half the view height in mm (at zoom 1)
+  view.persp.up.set(0, 0, 1); view.ortho.up.set(0, 0, 1);
+  view.camera = view.persp;
   view.controls = new OrbitControls(view.camera, view.renderer.domElement);
   view.controls.enableDamping = true;
   view.controls.screenSpacePanning = true;
@@ -150,9 +155,12 @@ function applyTheme() {
 function resize() {
   const host = $('viewport');
   const w = host.clientWidth, h = host.clientHeight;
+  if (w < 2 || h < 2) return;                        // hidden or minimised: keep the last size
   view.renderer.setSize(w, h, false);
-  view.camera.aspect = w / Math.max(h, 1);
-  view.camera.updateProjectionMatrix();
+  view.aspect = w / Math.max(h, 1);
+  view.persp.aspect = view.aspect;
+  view.persp.updateProjectionMatrix();
+  orthoFrustum();
   view.lineMat.resolution.set(w, h);
 }
 function buildBed() {
@@ -186,6 +194,11 @@ function applyMarkers() {
   app.markerHooks.forEach((f) => f(app.markers));
   try { localStorage.setItem('yora.markers', JSON.stringify(app.markers)); } catch (_) { /* storage blocked */ }
 }
+function orthoFrustum() {
+  const h = view.orthoHalf, a = view.aspect || 1;
+  Object.assign(view.ortho, { left: -h * a, right: h * a, top: h, bottom: -h });
+  view.ortho.updateProjectionMatrix();
+}
 function setView(kind) {
   const b = sceneBounds();
   const c = b.getCenter(new THREE.Vector3());
@@ -195,9 +208,40 @@ function setView(kind) {
   const dir = dirs[kind] ? new THREE.Vector3(...dirs[kind]).normalize()
     : view.camera.position.clone().sub(view.controls.target).normalize();
   view.controls.target.copy(c);
-  view.camera.position.copy(c).addScaledVector(dir, d);
-  view.camera.near = d / 1000; view.camera.far = d * 20;
-  view.camera.updateProjectionMatrix();
+  for (const cam of [view.persp, view.ortho]) {
+    cam.position.copy(c).addScaledVector(dir, d);
+    cam.near = cam.isOrthographicCamera ? 0.1 : d / 1000; cam.far = d * 20;
+  }
+  view.ortho.zoom = 1;
+  view.orthoHalf = size * 0.5;                         // about what the perspective camera shows at that distance
+  orthoFrustum();
+  view.persp.updateProjectionMatrix();
+}
+// Persp / Ortho: the other camera takes over where this one is looking, at the same apparent size
+function setProjection(ortho) {
+  const from = view.camera, to = ortho ? view.ortho : view.persp;
+  if (from !== to) {
+    const dist = from.position.distanceTo(view.controls.target);
+    to.position.copy(from.position); to.quaternion.copy(from.quaternion);
+    if (ortho) {   // the height the perspective camera sees at the target
+      view.orthoHalf = dist * Math.tan((view.persp.fov * Math.PI / 180) / 2);
+      view.ortho.zoom = 1; view.ortho.near = 0.1; view.ortho.far = Math.max(from.far, dist * 20);
+      orthoFrustum();
+    } else {       // move the perspective camera so it shows what the orthographic one did
+      const half = view.orthoHalf / (view.ortho.zoom || 1);
+      const d = half / Math.tan((view.persp.fov * Math.PI / 180) / 2);
+      const dir = from.position.clone().sub(view.controls.target).normalize();
+      to.position.copy(view.controls.target).addScaledVector(dir, d);
+      to.near = d / 1000; to.far = Math.max(from.far, d * 20);
+      to.updateProjectionMatrix();
+    }
+    view.camera = to;
+    view.controls.object = to;
+    view.controls.update();
+  }
+  const b = $('btnProjection');
+  if (b) { b.textContent = ortho ? 'Ortho' : 'Persp'; b.classList.toggle('on', ortho); b.setAttribute('aria-pressed', ortho); }
+  try { localStorage.setItem('yora.projection', ortho ? 'ortho' : 'persp'); } catch (_) { /* storage blocked */ }
 }
 function sceneBounds() {
   const b = new THREE.Box3();
@@ -1569,6 +1613,8 @@ async function boot() {
     }
   } catch (_) { /* an older server: starts empty */ }
   setView('iso');
+  $('btnProjection').addEventListener('click', () => setProjection(view.camera !== view.ortho));
+  try { if (localStorage.getItem('yora.projection') === 'ortho') setProjection(true); } catch (_) { /* storage blocked */ }
 
   $('fileInput').addEventListener('change', async (e) => { const fs = [...e.target.files]; e.target.value = ''; for (const f of fs) await openFile(f); });
   (await (await api('/api/samples')).json()).forEach((f) => $('sampleSelect').add(new Option(f, f)));
@@ -1661,7 +1707,7 @@ async function boot() {
     if (ev.key === 'Delete' && app.mode === 'prepare' && app.model && !ev.target.matches('input, textarea, select')) partAction('delete');
   });
   ['sx', 'sy', 'sz', 'rx', 'ry', 'rz', 'px', 'py'].forEach((id) => $(id).addEventListener('input', onTransformInput));
-  document.querySelectorAll('.view-tools button').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
+  document.querySelectorAll('.view-tools button[data-view]').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
   document.querySelectorAll('.show-menu input[data-marker]').forEach((c) => {
     c.checked = !!app.markers[c.dataset.marker];
     c.addEventListener('change', () => { app.markers[c.dataset.marker] = c.checked; applyMarkers(); });

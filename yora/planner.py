@@ -319,7 +319,7 @@ class Planner:
             return self.extrude_loop(path, layer, epm)
         if path.closed:
             pts = np.vstack([pts, pts[:1]])
-        elif self.pos is not None:
+        elif self.pos is not None and path is not layer.spiral:   # a spiral turn always runs forwards (Z rises)
             here = np.array(self.pos[:2])
             if np.hypot(*(pts[-1, :2] - here)) < np.hypot(*(pts[0, :2] - here)):
                 pts = pts[::-1]
