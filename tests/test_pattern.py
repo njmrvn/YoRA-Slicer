@@ -289,3 +289,22 @@ class PhaseTest(unittest.TestCase):
         ph = wave_phase(tp, 15)
         vals = np.array([ph[k] for k in sorted(ph) if k >= 2])
         self.assertLess(np.abs(wrap(vals - vals[0])).max(), 0.03)
+
+
+class SmoothSpiralTest(unittest.TestCase):
+    """Spiral vase on a leaning wall: the turns join without a sideways step."""
+
+    def test_leaning_wall(self):
+        r0, r1, h = 100.0, 140.0, 60.0                                     # a cone leaning out 34 deg
+        a = np.linspace(0, 2 * math.pi, 181)
+        P = lambda r, t, z: [C[0] + r * math.cos(t), C[1] + r * math.sin(t), z]   # noqa: E731
+        tris = []
+        for t0, t1 in zip(a[:-1], a[1:]):
+            tris += [[P(r0, t0, 0), P(r0, t1, 0), P(r1, t1, h)], [P(r0, t0, 0), P(r1, t1, h), P(r1, t0, h)],
+                     [P(0, 0, h), P(r1, t0, h), P(r1, t1, h)], [P(0, 0, 0), P(r0, t1, 0), P(r0, t0, 0)]]
+        tp = job(np.array(tris), spiral_vase=True, bottom_layers=1, layer_height=3, first_layer_height=3)
+        m = (tp.kind == KIND_OUTER) & (tp.layer >= 1)
+        x, y = tp.x[m], tp.y[m]
+        r = np.hypot(x - C[0], y - C[1])
+        self.assertLess(np.abs(np.diff(r)).max(), 0.25)                    # radius grows smoothly, no jog
+        self.assertAlmostEqual(r.max() - r.min(), (r1 - r0) * (tp.z[m].max() - tp.z[m].min()) / h, delta=3)
