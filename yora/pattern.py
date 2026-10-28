@@ -363,20 +363,27 @@ def _turn(pts, closed):
 
 
 def sample_positions(cum, a, b, n_per_wave, corners, keep):
-    """Arc lengths where points go: every 1/n of a wave, the profile corners, the kept vertices and both ends.
-    tau(u) = a * u + b."""
+    """Arc lengths where points go: every 1/n of a wave (and the profile corners), plus both ends and the kept
+    vertices. tau(u) = a * u + b. The ends and kept vertices must stay (the turns of a spiral join there), so wave
+    points closer than 60 % of a spacing to one of them are left out: no very short moves, which would slow the robot
+    down at every seam while the extruder keeps pushing."""
     L = cum[-1]
     t0, t1 = b, a * L + b
     fr = np.unique(np.concatenate([np.arange(n_per_wave) / n_per_wave, np.mod(corners, 1.0)]))
     waves = np.arange(math.floor(min(t0, t1)) - 1, math.ceil(max(t0, t1)) + 1)
     taus = (waves[:, None] + fr[None, :]).ravel()
-    u = (taus - b) / a
+    u = np.sort((taus - b) / a)
     u = u[(u > 1e-6) & (u < L - 1e-6)]
-    u = np.unique(np.concatenate([[0.0, L], u, cum[keep]]))
-    # drop near-duplicates (a kept vertex next to a wave sample)
-    if len(u) > 2:
-        gap = np.diff(u)
-        u = np.concatenate([[u[0]], u[1:][gap > 1e-4]])
+    fixed = np.unique(np.concatenate([[0.0, L], cum[keep]]))
+    gap = 0.6 / (abs(a) * n_per_wave)                  # 60 % of the spacing of the wave points, mm
+    if len(u):
+        j = np.clip(np.searchsorted(fixed, u), 1, len(fixed) - 1)
+        near = np.minimum(np.abs(u - fixed[j - 1]), np.abs(fixed[j] - u))
+        u = u[near >= gap]
+    u = np.unique(np.concatenate([fixed, u]))
+    if len(u) > 2:                                     # kept vertices right next to each other
+        d = np.diff(u)
+        u = np.concatenate([[u[0]], u[1:][d > 1e-4]])
         u[-1] = L
     return u
 

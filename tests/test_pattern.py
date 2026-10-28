@@ -308,3 +308,16 @@ class SmoothSpiralTest(unittest.TestCase):
         r = np.hypot(x - C[0], y - C[1])
         self.assertLess(np.abs(np.diff(r)).max(), 0.25)                    # radius grows smoothly, no jog
         self.assertAlmostEqual(r.max() - r.min(), (r1 - r0) * (tp.z[m].max() - tp.z[m].min()) / h, delta=3)
+
+
+class SeamPointsTest(unittest.TestCase):
+    """No very short moves where spiral turns join (they slow the robot down while the extruder keeps pushing)."""
+
+    def test_even_spacing_at_the_turn_joins(self):
+        tp = job(tube(100, 0, 40), spiral_vase=True, bottom_layers=1, pattern='sine', pattern_amplitude=2,
+                 pattern_wavelength=17, pattern_shift=50)
+        idx = np.nonzero((tp.kind == KIND_OUTER) & (tp.layer >= 1))[0]
+        idx = idx[np.diff(tp.e, prepend=0)[idx] > 0]
+        seg = np.hypot(tp.x[idx] - tp.x[idx - 1], tp.y[idx] - tp.y[idx - 1])
+        self.assertGreater(seg.min(), 0.5 * np.median(seg))
+        self.assertLess(seg.max(), 2.0 * np.median(seg))

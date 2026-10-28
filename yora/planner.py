@@ -335,14 +335,17 @@ class Planner:
         has_z = pts.shape[1] == 3
         f = self.speed_for(path.kind, layer.index)
         if has_z and self.pos is not None and math.dist(self.pos, pts[0]) < 2 * self.s['line_width']:
-            first = 0   # spiral continues from the previous turn: keep extruding, no travel
+            # spiral continues from the previous turn: keep extruding, no travel; its own start point is where the
+            # last turn ended (give or take a hair), so go straight on to the next point: no tiny move at the join
+            first = 1 if len(pts) > 2 and math.dist(self.pos[:2], pts[0][:2]) < 0.5 * self.s['line_width'] else 0
         else:
             self.travel_to(pts[0], float(pts[0, 2]) if has_z else z, layer.index)
             first = 1
-        for p in pts[first:]:
+        tiny = 0.02 * self.s['line_width'] if has_z else 0.0   # spiral: a point on top of the last one (a turn join)
+        for k, p in enumerate(pts[first:]):
             pz = float(p[2]) if has_z else z
             seg = math.sqrt((p[0] - self.pos[0]) ** 2 + (p[1] - self.pos[1]) ** 2 + (pz - self.pos[2]) ** 2)
-            if seg < 1e-9:
+            if seg < 1e-9 or (tiny and k + first < len(pts) - 1 and seg < tiny):
                 continue
             self.e += seg * epm
             self.add(float(p[0]), float(p[1]), pz, f, path.kind, layer.index)
