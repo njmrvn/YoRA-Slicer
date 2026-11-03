@@ -34,7 +34,7 @@ Press **Save** (Ctrl+S) to keep everything as a `.yora` project, and **Ctrl+Z** 
 - Angled layers for printing overhangs without supports
 - Overhang view: colours steep walls and warns past the material's limit
 - Seam control: pick a point or draw a line on the part
-- Surface patterns: waves, spikes, bumps, noise or a picture on the outer wall
+- Surface patterns: waves, spikes, bumps, noise or a picture on the outer wall, in up to four layers, on surfaces you paint or pick
 - Even point spacing for smooth robot motion
 - Robot reach, limit and collision checks with a 3D simulation
 - Material library with heating zone temperatures
@@ -50,8 +50,22 @@ Add texture to a part without changing the model. After slicing, open the **Surf
 - **Bumps** and **noise**: rows of domes or a random relief.
 - **Image**: wrap a PNG or JPG (a logo or a texture) around the part.
 - **Paint**: brush the pattern onto just the areas you want, or keep it off them.
+- **Fill**: click a surface to pick all of it at once. It spreads over the part until an edge bends more than the fill angle, so one click picks a flat side or the whole round body of a vase. Picked surfaces move with the part.
+- **Skip slopes over**: keep the pattern off walls that lean more than a set angle, such as a shoulder or a chamfer.
 
 <img src="docs/surface-pattern.png" width="640" alt="A vase with a woven sine pattern">
+
+### Pattern layers
+
+Put up to four patterns on one part, for example a sine on the body and a picture on one face. The chips at the top of the card (`1 · Sine`, `2 · Zigzag`, `+ Layer`) pick the layer that the card edits.
+
+1. Set up the first pattern as usual.
+2. Press **+ Layer**, choose its pattern, then click the surfaces where it goes (Fill is already on). Press **Done**.
+3. Choose how it meets the layers below: **Cover** replaces them where this layer is, **Add** puts its relief on top. **Edge blend** fades between them at the edges of a picked surface.
+
+Each layer can be hidden, duplicated or deleted, and keeps its own waves per lap.
+
+<img src="docs/surface-layers.png" width="640" alt="A bracket with a sine pattern on every wall and a deep zigzag on its front face">
 
 ## Getting started
 
