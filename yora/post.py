@@ -65,6 +65,9 @@ LANGUAGES = {
         'ext': '.zip',
         'raw': True,
         'options': [
+            ('tool_axis', 'Tool direction', 'choice', 'x', {'options': ['x', 'z'],
+             'help': 'Axis of the KUKA tool frame that points out of the nozzle. x: KUKA standard (the nozzle points down '
+                     'with B 90). z: the same frame as the slicer TCP. TOOL_DATA on the controller must match.'}),
             ('output_mode', 'Output switching', 'choice', 'trigger', {'options': ['trigger', 'out_c', 'direct'],
              'help': 'trigger: TRIGGER WHEN DISTANCE=0 DO $OUT[n], switched exactly at the start of the next move '
                      '(recommended). out_c: $OUT_C[n]. direct: $OUT[n] (switches early, in the advance run).'}),
@@ -270,7 +273,7 @@ def _robot_post_class(language):
 def _export_robot(tp, s, out_dir, name, robot_path, d):
     from . import robot
     cls = _robot_post_class(d['language'])           # also puts posts/ on sys.path
-    from borunte_act import eye, rotx, rotz, transl   # numpy poses
+    from borunte_act import eye, rotx, roty, rotz, transl   # numpy poses
     name = robot.safe_name(name)
     r = cls(robot.POST_NAME, 'robot', 6)
     for k, v in robot.post_settings(s, tp.stats).items():
@@ -311,6 +314,8 @@ def _export_robot(tp, s, out_dir, name, robot_path, d):
         joints = parse_float_list(s['start_joints']) if s['start_joints'].strip() else None
         rz_of = lambda i: float(s['tool_rz'])
     down = rotx(math.pi)
+    # KUKA standard: tool X out of the nozzle. Same physical pose, the tool frame turned after the nozzle's Z turn
+    to_tool = roty(-math.pi / 2) if d['language'] == 'kuka_krl' and o.get('tool_axis', 'x') == 'x' else eye()
 
     r.ProgStart(name)
     r.setFrame(eye(), int(s['user_frame_id']), 'Bed')
@@ -345,7 +350,7 @@ def _export_robot(tp, s, out_dir, name, robot_path, d):
         if f != last_f:
             r.setSpeed(f)
             last_f = f
-        r.MoveL(transl(x, y, z) @ tool_rotation(tp, i) @ down @ rotz(math.radians(rz_of(i))), None, None)
+        r.MoveL(transl(x, y, z) @ tool_rotation(tp, i) @ down @ rotz(math.radians(rz_of(i))) @ to_tool, None, None)
         prev = here
     if cur_layer is not None:
         run('layer_end')

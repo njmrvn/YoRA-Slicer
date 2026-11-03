@@ -100,8 +100,10 @@ class BorunteTest(unittest.TestCase):
 
 class KukaTest(unittest.TestCase):
 
-    def export(self, tp, s, rp=None, **events):
-        path, info = post.export_program(tp, s, tempfile.mkdtemp(), 'Krl Test', rp, with_events('KUKA KRL (KR C4)', **events))
+    def export(self, tp, s, rp=None, tool_axis='x', **events):
+        d = with_events('KUKA KRL (KR C4)', **events)
+        d['options']['tool_axis'] = tool_axis
+        path, info = post.export_program(tp, s, tempfile.mkdtemp(), 'Krl Test', rp, d)
         return files(path), info
 
     def test_program_structure(self):
@@ -139,7 +141,23 @@ class KukaTest(unittest.TestCase):
         m = re.search(r'LIN \{X ([-\d.]+),Y ([-\d.]+),Z ([-\d.]+),A ([-\d.]+),B ([-\d.]+),C ([-\d.]+)\}', f['Krl_Test.src'])
         a, b, c = (math.radians(float(m.group(k))) for k in (4, 5, 6))
         R = K.rotz(a)[:3, :3] @ K.roty(b)[:3, :3] @ K.rotx(c)[:3, :3]                      # KUKA: Rz(A) Ry(B) Rx(C)
-        np.testing.assert_allclose(R, (K.rotx(math.pi) @ K.rotz(math.radians(30)))[:3, :3], atol=1e-6)
+        expect = K.rotx(math.pi) @ K.rotz(math.radians(30)) @ K.roty(-math.pi / 2)    # tool X out of the nozzle
+        np.testing.assert_allclose(R, expect[:3, :3], atol=1e-6)
+
+    def test_tool_direction_same_flange(self):
+        # tool X or tool Z out of the nozzle: with the matching tool frame the flange ends up in the same place
+        tp, s = job(tcp='374.2,17.467,30.652,90,90,0')
+        tcp = K.xyzrpw_to_pose([374.2, 17.467, 30.652, 90, 90, 0])
+        tools = {'x': tcp @ K.roty(-math.pi / 2), 'z': tcp}
+        num = r'\{X ([-\d.]+),Y ([-\d.]+),Z ([-\d.]+),A ([-\d.]+),B ([-\d.]+),C ([-\d.]+)\}'
+        flanges = []
+        for axis in ('x', 'z'):
+            src = self.export(tp, s, tool_axis=axis)[0]['Krl_Test.src']
+            x, y, z, a, b, c = (float(v) for v in re.search('LIN ' + num, src).groups())
+            lin = K.transl(x, y, z) @ K.rotz(math.radians(a)) @ K.roty(math.radians(b)) @ K.rotx(math.radians(c))
+            flanges.append(lin @ np.linalg.inv(tools[axis]))
+            self.assertNotIn('TOOL_DATA[1]={', src)
+        np.testing.assert_allclose(flanges[0], flanges[1], atol=1e-3)
 
     @unittest.skipUnless(MODEL in K.list_robots(), 'robot model not imported yet')
     def test_starts_with_ptp_to_checked_joints(self):

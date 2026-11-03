@@ -73,7 +73,7 @@ class AngledTest(unittest.TestCase):
         for row in lins[5:15]:
             a, b, c = (math.radians(float(v)) for v in row[3:])
             R = (K.rotz(a) @ K.roty(b) @ K.rotx(c))[:3, :3]
-            np.testing.assert_allclose(R[:, 2], -n, atol=1e-3)          # tool Z perpendicular to the layer
+            np.testing.assert_allclose(R[:, 0], -n, atol=1e-3)          # tool X (KUKA standard) perpendicular to the layer
 
 
 if __name__ == '__main__':
