@@ -321,3 +321,72 @@ class SeamPointsTest(unittest.TestCase):
         seg = np.hypot(tp.x[idx] - tp.x[idx - 1], tp.y[idx] - tp.y[idx - 1])
         self.assertGreater(seg.min(), 0.5 * np.median(seg))
         self.assertLess(seg.max(), 2.0 * np.median(seg))
+
+
+def cone(r0, r1, h, n=180):
+    """Closed solid of revolution: radius r0 at the bed, r1 at height h, centred on C."""
+    a = np.linspace(0, 2 * math.pi, n + 1)
+    p = lambda r, t, z: [C[0] + r * math.cos(t), C[1] + r * math.sin(t), z]   # noqa: E731
+    tris = []
+    for t0, t1 in zip(a[:-1], a[1:]):
+        b0, b1, u0, u1 = p(r0, t0, 0), p(r0, t1, 0), p(r1, t0, h), p(r1, t1, h)
+        tris += [[b0, b1, u1], [b0, u1, u0], [p(0, 0, h), u0, u1], [p(0, 0, 0), b1, b0]]
+    return np.array(tris, dtype=float)
+
+
+def box(sx=200.0, sy=200.0, sz=60.0):
+    from yora import mesh
+    return mesh.place(mesh.box_mesh(sx, sy, sz), center_xy=tuple(C))
+
+
+class FillTest(unittest.TestCase):
+
+    def test_fill_one_side_of_a_box(self):
+        tris = box()
+        n = pattern.normals(tris)
+        side = int(np.nonzero(n[:, 0] > 0.99)[0][0])
+        got = pattern.fill_region(tris, side, 30)
+        self.assertEqual(len(got), 2)                                  # the +X face: two triangles
+        self.assertTrue((n[got, 0] > 0.99).all())
+        self.assertEqual(len(pattern.fill_region(tris, side, 91)), len(tris))   # over the 90 degree edges: all
+
+    def test_fill_round_side_stops_at_the_caps(self):
+        tris = tube(100, 0, 80)
+        side = int(np.nonzero(np.abs(pattern.normals(tris)[:, 2]) < 0.1)[0][0])
+        got = pattern.fill_region(tris, side, 30)
+        self.assertEqual(len(got), 360)                                # the whole round side, no cap triangles
+
+    def test_faces_text(self):
+        f = {3: [0, 1, 2, 3, 7, 9, 10], 1: [5]}
+        text = pattern.format_faces(f)
+        self.assertEqual(text, '1:5; 3:0-3,7,9-10')
+        back = pattern.parse_faces(text)
+        self.assertEqual(sorted(back), [1, 3])
+        np.testing.assert_array_equal(back[3], f[3])
+        self.assertEqual(pattern.remap_faces(text, {3: 8}), '8:0-3,7,9-10')
+        flags = pattern.face_flags('8:1,4', [(2, 3), (8, 5)])
+        np.testing.assert_array_equal(np.nonzero(flags)[0], [4, 7])
+        self.assertIsNone(pattern.face_flags('', [(2, 3)]))
+
+    def test_picked_face_only(self):
+        tris = box()
+        n = pattern.normals(tris)
+        picked = pattern.fill_region(tris, int(np.nonzero(n[:, 0] > 0.99)[0][0]), 30)
+        flags = np.zeros(len(tris), dtype=bool)
+        flags[picked] = True
+        tp = yora.slice_to_toolpath(tris, settings.normalize({
+            'layer_height': 4, 'first_layer_height': 4, 'line_width': 5, 'walls': 1, 'infill_density': 0,
+            'top_layers': 0, 'bottom_layers': 0, 'pattern': 'sine', 'pattern_amplitude': 4, 'pattern_wavelength': 20,
+            'pattern_paint_mode': 'painted'}), faces=flags)
+        xy, _ = outer(tp, 5)
+        px = xy[(xy[:, 0] > C[0] + 90) & (np.abs(xy[:, 1] - C[1]) < 80)]    # middle of the +X side
+        mx = xy[(xy[:, 0] < C[0] - 90) & (np.abs(xy[:, 1] - C[1]) < 80)]    # middle of the -X side
+        self.assertGreater(np.ptp(px[:, 0]), 3.0)                           # waves on the picked side
+        self.assertLess(np.ptp(mx[:, 0]), 0.01)                             # plain on the other
+
+    def test_slope_limit(self):
+        steep = cone(150, 150 - 120 * math.tan(math.radians(30)), 120)     # wall leaning 30 degrees
+        ptp = lambda tp: np.ptp(outer(tp, 10)[1])                           # noqa: E731
+        self.assertGreater(ptp(job(steep, pattern='sine', pattern_slope_limit=40)), 3.0)
+        self.assertLess(ptp(job(steep, pattern='sine', pattern_slope_limit=20)), 0.5)
+        self.assertGreater(ptp(job(tube(150, 0, 120), pattern='sine', pattern_slope_limit=20)), 3.0)   # upright

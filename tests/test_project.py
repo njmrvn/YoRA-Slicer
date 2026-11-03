@@ -94,6 +94,7 @@ class ProjectTest(unittest.TestCase):
             self.assertEqual([n for n, _, _ in p['parts']], ['cube.stl', 'flat.stl'])
             self.assertEqual(p['parts'][1][2], {'scale': [100, 100, 150], 'rotation': [0, 0, 30], 'center': [200, 700]})
             np.testing.assert_allclose(p['parts'][0][1], mesh.box_mesh(50, 50, 50), atol=1e-5)
+            self.assertEqual(p['ids'], [q['id'] for q in plate.parts])            # picked surfaces follow the parts
             self.assertTrue(os.path.isfile(os.path.join(d, 'patterns', 'logo.png')))
             self.assertIn('Added patterns/logo.png from the project.', p['notes'])
             with open(os.path.join(d, 'patterns', 'logo.png'), 'wb') as f:          # the user's own, different copy

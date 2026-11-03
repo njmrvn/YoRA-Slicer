@@ -4,7 +4,7 @@
 The model is sliced as usual; each outer wall loop (and each spiral vase turn) is then resampled along its length and
 every point is moved sideways, perpendicular to the wall, towards the air, by
 
-    offset = depth * height factor * paint mask * (pattern(point) - base)
+    offset = depth * height factor * paint mask * slope mask * (pattern(point) - base)
 
 pattern() is 0..1. tau counts waves along the wall. With 'fit' (Whole waves per lap, the default) the outline is
 followed up the part as a stack (same centre, similar perimeter, layer after layer) and the stack gets ONE whole wave
@@ -25,7 +25,10 @@ diameter: ribs stay vertical and diagonals keep their angle. Without fit: tau = 
              height -> picture Y); dark or light parts raised
 
 base: outward 0 (the wall only grows), inward 1 (only cuts in), centered 0.5. The paint mask limits the pattern to the
-areas painted on the part (or keeps it off them). Paths are (n, 2) or (n, 3) arrays; distances are measured in XY.
+areas painted on the part (or keeps it off them): brush strokes (points in bed coordinates) and surfaces picked with
+the fill tool (triangles of a part, so they move with it). The slope mask keeps the pattern off walls that lean more
+than a set angle. Both look up the part's surface next to each wall point: the triangles cut at that height.
+Paths are (n, 2) or (n, 3) arrays; distances are measured in XY.
 """
 import math
 import os
@@ -233,13 +236,14 @@ def parse_points(text):
     return np.array(pts, dtype=float) if pts else None
 
 
-def paint_mask(s, P, x, y, z):
-    """1 where the pattern goes, 0 where it does not, soft at the brush edge."""
+def paint_mask(s, P, x, y, z, faces=None):
+    """1 where the pattern goes, 0 where it does not, soft at the brush edge. faces: 0..1 per point, on a surface
+    picked with the fill tool (surface_masks)."""
     mode = s.get('pattern_paint_mode', 'everywhere')
     if mode == 'everywhere':
         return np.ones(len(z))
     r = max(s.get('pattern_brush', 15.0), 0.1)
-    m = np.zeros(len(z))
+    m = np.zeros(len(z)) if faces is None else np.asarray(faces, dtype=float)
     if P is not None and len(P):
         near = P[np.abs(P[:, 2] - z.mean()) <= r + (z.max() - z.min()) / 2 + 1e-6]
         if len(near):
@@ -248,8 +252,176 @@ def paint_mask(s, P, x, y, z):
             for k in range(0, len(near), 512):
                 C = near[k:k + 512]
                 d = np.minimum(d, np.sqrt(((Q[:, None, :] - C[None]) ** 2).sum(2)).min(1))
-            m = np.clip((r - d) / (0.3 * r), 0.0, 1.0)
+            m = np.maximum(m, np.clip((r - d) / (0.3 * r), 0.0, 1.0))
     return m if mode == 'painted' else 1.0 - m
+
+
+def slope_mask(s, lean):
+    """1 where the wall leans at most Skip slopes over from vertical, 0 beyond, faded over 5 degrees."""
+    limit = s.get('pattern_slope_limit', 0.0)
+    if limit <= 0 or lean is None:
+        return 1.0
+    return np.clip((limit + 2.5 - lean) / 5.0, 0.0, 1.0)
+
+
+# ------------------------------------------------------------------ surfaces picked with the fill tool
+def parse_faces(text):
+    """'id:a-b,c,...; id:...' -> {part id: sorted array of triangle indices of that part}."""
+    out = {}
+    for part in str(text or '').split(';'):
+        if ':' not in part:
+            continue
+        pid, _, rng = part.partition(':')
+        try:
+            pid = int(pid)
+        except ValueError:
+            continue
+        idx = []
+        for r in rng.split(','):
+            a, _, b = r.strip().partition('-')
+            if a.strip().isdigit():
+                lo = int(a)
+                hi = int(b) if b.strip().isdigit() else lo
+                idx.append(np.arange(lo, max(hi, lo) + 1))
+        if idx:
+            out[pid] = np.unique(np.concatenate(idx))
+    return out
+
+
+def format_faces(faces):
+    """Inverse of parse_faces: runs of following indices are written a-b."""
+    parts = []
+    for pid in sorted(faces):
+        idx = np.unique(np.asarray(faces[pid], dtype=np.int64))
+        if not len(idx):
+            continue
+        cut = np.nonzero(np.diff(idx) != 1)[0]
+        lo, hi = idx[np.r_[0, cut + 1]], idx[np.r_[cut, len(idx) - 1]]
+        parts.append('%d:%s' % (pid, ','.join(str(a) if a == b else '%d-%d' % (a, b) for a, b in zip(lo, hi))))
+    return '; '.join(parts)
+
+
+def remap_faces(text, ids):
+    """The picked surfaces with part ids renamed {old: new} (a project opened again gets new part ids)."""
+    f = parse_faces(text)
+    return format_faces({ids[k]: v for k, v in f.items() if k in ids})
+
+
+def face_flags(text, parts):
+    """Picked surfaces -> bool per triangle of all parts together. parts: [(id, triangle count)] in plate order.
+    None when nothing is picked."""
+    f = parse_faces(text)
+    if not f:
+        return None
+    flags = np.zeros(sum(n for _, n in parts), dtype=bool)
+    start = 0
+    for pid, n in parts:
+        idx = f.get(pid)
+        if idx is not None:
+            flags[start + idx[idx < n]] = True
+        start += n
+    return flags if flags.any() else None
+
+
+def _adjacency(tris):
+    """Triangle neighbours across shared edges (vertices welded to 1e-4 mm): CSR arrays (start, neighbour)."""
+    v = np.round(np.asarray(tris, dtype=float).reshape(-1, 3) / 1e-4).astype(np.int64)
+    _, vid = np.unique(v, axis=0, return_inverse=True)
+    vid = vid.reshape(-1, 3)
+    e = np.concatenate([vid[:, [0, 1]], vid[:, [1, 2]], vid[:, [2, 0]]])
+    f = np.tile(np.arange(len(vid)), 3)
+    e.sort(1)
+    key = e[:, 0] * (int(vid.max()) + 1) + e[:, 1]
+    o = np.argsort(key, kind='stable')
+    key, f = key[o], f[o]
+    a, b = [], []
+    for k in range(1, 4):                                 # an edge can be shared by up to 4 triangles (non-manifold)
+        same = np.nonzero(key[k:] == key[:-k])[0]
+        a.append(f[same])
+        b.append(f[same + k])
+    a, b = np.concatenate(a + b), np.concatenate(b + a)
+    o = np.argsort(a, kind='stable')
+    a, b = a[o], b[o]
+    start = np.searchsorted(a, np.arange(len(vid) + 1))
+    return start, b
+
+
+def normals(tris):
+    n = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    return n / np.maximum(np.linalg.norm(n, axis=1), 1e-18)[:, None]
+
+
+_ADJ = {}
+
+
+def fill_region(tris, seed, angle, cache_key=None):
+    """Triangles reached from `seed` by crossing edges where the surface bends at most `angle` degrees (flood fill
+    by angle). tris: (n, 3, 3) of one part. Returns the sorted triangle indices."""
+    tris = np.asarray(tris, dtype=float)
+    adj = _ADJ.get(cache_key) if cache_key is not None else None
+    if adj is None or len(adj[0]) != len(tris) + 1:
+        adj = _adjacency(tris)
+        if cache_key is not None:
+            _ADJ.clear()
+            _ADJ[cache_key] = adj
+    start, nb = adj
+    n = normals(tris)
+    cos = math.cos(math.radians(min(max(angle, 0.0), 180.0))) - 1e-9
+    seen = np.zeros(len(tris), dtype=bool)
+    seen[seed] = True
+    front = np.array([seed])
+    while len(front):
+        cnt = start[front + 1] - start[front]
+        src = np.repeat(front, cnt)
+        to = nb[np.repeat(start[front], cnt) + np.arange(int(cnt.sum())) - np.repeat(np.cumsum(cnt) - cnt, cnt)]
+        ok = ~seen[to] & ((n[src] * n[to]).sum(1) >= cos)
+        front = np.unique(to[ok])
+        seen[front] = True
+    return np.nonzero(seen)[0]
+
+
+def surface(tris, faces=None):
+    """What the masks need from the part's surface: the triangles, their height range, how far each leans from
+    vertical (deg) and whether it was picked with the fill tool."""
+    tris = np.asarray(tris, dtype=float)
+    nz = normals(tris)[:, 2]
+    return {'tris': tris, 'zlo': tris[:, :, 2].min(1), 'zhi': tris[:, :, 2].max(1),
+            'lean': np.degrees(np.arcsin(np.clip(np.abs(nz), 0.0, 1.0))),
+            'picked': None if faces is None else np.asarray(faces, dtype=bool)}
+
+
+def surface_masks(surf, xy, z, reach):
+    """For each wall point (xy, model height z): (picked 0/1, lean of the wall there in deg), from the nearest
+    triangle cut at that height. Points with no surface within reach get picked 0 and lean 0."""
+    from .overhang import nearest_segment
+    m = len(xy)
+    picked, lean = np.zeros(m), np.zeros(m)
+    if surf is None or not m:
+        return picked, lean
+    z0 = float(np.median(z))
+    sel = np.nonzero((surf['zlo'] <= z0) & (surf['zhi'] >= z0) & (surf['zhi'] > surf['zlo']))[0]
+    if not len(sel):
+        return picked, lean
+    T = surf['tris'][sel]
+    dz = T[:, :, 2] - z0
+    dz = np.where(dz == 0.0, 1e-9, dz)
+    a, b = [0, 1, 2], [1, 2, 0]
+    cross = (dz[:, a] > 0) != (dz[:, b] > 0)                     # (k, 3) edges cut by the plane
+    keep = cross.sum(1) == 2
+    T, dz, cross, sel = T[keep], dz[keep], cross[keep], sel[keep]
+    if not len(sel):
+        return picked, lean
+    t = dz[:, a] / np.where(cross, dz[:, a] - dz[:, b], 1.0)
+    P = T[:, a, :2] + t[:, :, None] * (T[:, b, :2] - T[:, a, :2])  # (k, 3, 2) cut point on each edge
+    e = np.argsort(~cross, axis=1, kind='stable')[:, :2]
+    r = np.arange(len(sel))
+    d, w = nearest_segment(np.asarray(xy, dtype=float), P[r, e[:, 0]], P[r, e[:, 1]], reach)
+    hit = w >= 0
+    tri = sel[w[hit]]
+    lean[hit] = surf['lean'][tri]
+    if surf['picked'] is not None:
+        picked[hit] = surf['picked'][tri]
+    return picked, lean
 
 
 # ------------------------------------------------------------------ applying it to a path
@@ -323,10 +495,15 @@ def lap_start(pts, cum, center):
     return float(cum[i] + t * (cum[i + 1] - cum[i]))
 
 
-def context(s, layers):
+def needs_surface(s, has_faces):
+    """Whether the masks look at the part's surface: a slope limit, or picked surfaces that count."""
+    return s.get('pattern_slope_limit', 0.0) > 0 or (has_faces and s.get('pattern_paint_mode', 'everywhere') != 'everywhere')
+
+
+def context(s, layers, surf=None):
     """What the pattern needs to know about the whole part: centre (picture wrap), top height, picture, paint,
-    and the wave count of every outline (stacks)."""
-    ctx = {'center': (0.0, 0.0), 'ztop': 0.0, 'image': None, 'paint': None, 'loops': {}, 'report': []}
+    and the wave count of every outline (stacks). surf: surface() of the part (slope mask, picked surfaces)."""
+    ctx = {'center': (0.0, 0.0), 'ztop': 0.0, 'image': None, 'paint': None, 'loops': {}, 'report': [], 'surface': surf}
     if s.get('pattern_fit', True) and s.get('pattern') != 'image':
         ctx['loops'], ctx['report'] = stacks(s, layers)
     lo, hi, top = np.array([np.inf, np.inf]), np.array([-np.inf, -np.inf]), 0.0
@@ -471,7 +648,9 @@ def apply(pts, s, closed, layer_index, air_sign=1.0, model_z=None, spiral=False,
     else:
         g = profile(kind, tau, width)
     base = BASES.get(s.get('pattern_direction', 'outward'), 0.0)
-    k = height_factor(s, z) * paint_mask(s, ctx.get('paint'), xy[:, 0], xy[:, 1], z)
+    surf = ctx.get('surface')
+    picked, lean = surface_masks(surf, xy, z, 5.0 * s.get('line_width', 10.0) + 2.0) if surf is not None else (None, None)
+    k = height_factor(s, z) * paint_mask(s, ctx.get('paint'), xy[:, 0], xy[:, 1], z, picked) * slope_mask(s, lean)
     off = s['pattern_amplitude'] * k * (g - base)
     q[:, :2] = xy + nrm * off[:, None]
     if closed:
@@ -510,6 +689,7 @@ def warnings(s):
         out.append('Surface pattern: inward / centered waves run into the inner wall. Use outward, one wall or spiral vase.')
     if kind == 'image' and load_image(s.get('pattern_image', '')) is None:
         out.append('Surface pattern: no picture chosen (or the file is gone). Upload one in the Surface pattern card.')
-    if s.get('pattern_paint_mode', 'everywhere') == 'painted' and parse_points(s.get('pattern_paint', '')) is None:
+    if (s.get('pattern_paint_mode', 'everywhere') == 'painted' and parse_points(s.get('pattern_paint', '')) is None
+            and not parse_faces(s.get('pattern_faces', ''))):
         out.append('Surface pattern: "only painted areas" is chosen but nothing is painted, so the wall stays plain.')
     return out

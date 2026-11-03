@@ -877,6 +877,7 @@ function updateObjectPanel() {
   const m = app.model;
   $('objectEmpty').hidden = !!m; $('objectBody').hidden = !m;
   $('btnSaveProject').disabled = !m;
+  $('btnSaveProjectAs').disabled = !m;
   const part = selectedPart();
   $('btnDuplicate').disabled = $('btnDelete').disabled = !part;
   if (!m || !part) return;
@@ -1007,7 +1008,7 @@ async function applyState(st) {
 // ------------------------------------------------------------------ project files (.yora)
 // Save: the parts, every setting and the files they use, in one .yora file. Where the browser can (Chrome, Edge),
 // a Save dialog picks the place and Ctrl+S then saves to the same file again; otherwise it is downloaded.
-// Shift+Save or Ctrl+Shift+S always asks for a new place.
+// Save as… (or Shift+Save, Ctrl+Shift+S) always asks for a new place.
 app.projectHandle = null;
 async function saveProject(saveAs = false) {
   if (!app.model) return toast('Nothing to save: open a model first.', 'warn', 3000);
@@ -1537,6 +1538,7 @@ function progress(frac, text) { $('progressBar').style.width = `${Math.round(fra
 function refreshButtons() {
   $('btnSlice').disabled = app.busy || !app.model;
   $('btnSaveProject').disabled = app.busy || !app.model;
+  $('btnSaveProjectAs').disabled = app.busy || !app.model;
   const has = !!app.result && !app.busy;
   ['btnExportProgram', 'btnPreviewCode', 'btnExportGcode'].forEach((id) => { $(id).disabled = !has; });
   $('tabPreview').disabled = !app.result;
@@ -1702,6 +1704,7 @@ async function boot() {
   $('btnDuplicate').addEventListener('click', () => partAction('duplicate'));
   $('btnDelete').addEventListener('click', () => partAction('delete'));
   $('btnSaveProject').addEventListener('click', (e) => saveProject(e.shiftKey));
+  $('btnSaveProjectAs').addEventListener('click', () => saveProject(true));
   window.addEventListener('keydown', (ev) => {
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') { ev.preventDefault(); saveProject(ev.shiftKey); return; }
     if (ev.key === 'Delete' && app.mode === 'prepare' && app.model && !ev.target.matches('input, textarea, select')) partAction('delete');

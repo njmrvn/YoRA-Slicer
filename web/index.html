@@ -55,6 +55,7 @@
     <button id="btnUndo" class="btn ghost icon-only" disabled aria-label="Undo" title="Undo (Ctrl+Z)"><svg class="ic"><use href="#i-undo"/></svg></button>
     <button id="btnRedo" class="btn ghost icon-only" disabled aria-label="Redo" title="Redo (Ctrl+Y)"><svg class="ic"><use href="#i-redo"/></svg></button>
     <button id="btnSaveProject" class="btn ghost" disabled title="Save the project (.yora): the parts, every setting and the files they use. Ctrl+S"><svg class="ic"><use href="#i-save"/></svg>Save</button>
+    <button id="btnSaveProjectAs" class="btn ghost" disabled title="Save a copy of the project under a new name or place (.yora). Ctrl+Shift+S">Save as…</button>
     <select id="sampleSelect" class="btn ghost" aria-label="Open a sample"><option value="">Samples</option></select>
     <button id="btnSlice" class="btn primary" disabled><svg class="ic"><use href="#i-slice"/></svg>Slice</button>
     <details class="menu">
@@ -237,9 +238,10 @@
           <div class="pat-row"><label for="patPaintMode">Where</label><select id="patPaintMode"><option value="everywhere">Everywhere</option><option value="painted">Only painted areas</option><option value="unpainted">Except painted areas</option></select></div>
           <div class="row-btns">
             <button id="patPaintBtn" class="btn small" title="Paint on the part where the pattern should go">Paint</button>
+            <button id="patFillBtn" class="btn small" title="Click a surface to pick all of it at once: it spreads until an edge bends more than the fill angle">Fill</button>
             <button id="patEraseBtn" class="btn small" title="Rub out painted areas">Erase</button>
             <button id="patPaintUndo" class="btn small" hidden>Undo</button>
-            <button id="patPaintClear" class="btn small" title="Remove all painted areas">Clear</button>
+            <button id="patPaintClear" class="btn small" title="Remove all painted areas and picked surfaces">Clear</button>
             <span class="muted small" id="patPaintCount"></span>
           </div>
           <div class="muted small" id="patPaintHint"></div>

@@ -22,6 +22,12 @@ WALLS = (KIND_OUTER, KIND_INNER)
 def nearest_distance(Q, A, B, reach):
     """Distance from each point Q (m, 2) to the nearest segment A-B (k, 2), looked at only within `reach`; farther
     points get `reach`."""
+    return nearest_segment(Q, A, B, reach)[0]
+
+
+def nearest_segment(Q, A, B, reach):
+    """(distance, index of the segment) from each point Q (m, 2) to the nearest segment A-B (k, 2), looked at only
+    within `reach`; farther points get `reach` and index -1."""
     g = 2.0 * reach                                # cell size: pieces <= reach/2 long, so 3 x 3 cells cover the reach
     L = np.hypot(*(B - A).T)
     n = np.maximum(np.ceil(L / (reach / 2)), 1).astype(int)
@@ -39,6 +45,7 @@ def nearest_distance(Q, A, B, reach):
     skey = pkey[order]
     qc = cell(Q)
     best = np.full(len(Q), reach)
+    which = np.full(len(Q), -1, dtype=np.int64)
     for dx in (-1, 0, 1):
         for dy in (-1, 0, 1):
             qk = (qc[:, 0] + dx) * BIG + (qc[:, 1] + dy)
@@ -52,8 +59,16 @@ def nearest_distance(Q, A, B, reach):
             a, ab = PA[pi], PB[pi] - PA[pi]
             u = np.clip(((Q[qi] - a) * ab).sum(1) / np.maximum((ab * ab).sum(1), 1e-18), 0, 1)
             d = np.hypot(*(Q[qi] - a - u[:, None] * ab).T)
-            np.minimum.at(best, qi, d)
-    return best
+            # the nearest piece for each point: sort by point, then distance, keep the first of each point
+            o = np.lexsort((d, qi))
+            qi, d, pi = qi[o], d[o], pi[o]
+            first = np.ones(len(qi), dtype=bool)
+            first[1:] = qi[1:] != qi[:-1]
+            qi, d, pi = qi[first], d[first], pi[first]
+            better = d < best[qi]
+            best[qi[better]] = d[better]
+            which[qi[better]] = seg[pi[better]]
+    return best, which
 
 
 def inside(Q, A, B):

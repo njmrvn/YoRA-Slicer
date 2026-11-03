@@ -162,12 +162,20 @@ SPEC = [
         {'help': 'image: repeat the picture all the way round, every Picture width degrees.'}),
     ('Surface pattern', 'pattern_paint_mode', 'Painted areas', 'choice', 'everywhere',
      {'options': ['everywhere', 'painted', 'unpainted'],
-        'help': 'everywhere: the whole wall. painted: only where you painted on the part (Paint in the Surface pattern '
-                'card). unpainted: everywhere except the painted areas.'}),
+        'help': 'everywhere: the whole wall. painted: only where you painted on the part or picked a surface (Paint and '
+                'Fill in the Surface pattern card). unpainted: everywhere except those areas.'}),
     ('Surface pattern', 'pattern_brush', 'Brush size', 'float', 15, {'unit': 'mm', 'min': 0.5, 'max': 1000,
         'help': 'Radius of the paint brush; the pattern fades out over the outer third.'}),
     ('Surface pattern', 'pattern_paint', 'Painted points', 'text', '', {'hidden': True,
         'help': 'Points x,y,z; ... painted on the part (model position on the bed).'}),
+    ('Surface pattern', 'pattern_fill_angle', 'Fill angle', 'float', 30, {'unit': 'deg', 'min': 1, 'max': 180,
+        'help': 'Fill: a click picks the surface under the pointer and spreads over the part until an edge bends more '
+                'than this. Small = one flat face; larger = round over soft edges.'}),
+    ('Surface pattern', 'pattern_faces', 'Picked surfaces', 'text', '', {'hidden': True,
+        'help': 'Triangles picked with Fill, per part: id:a-b,c; ...'}),
+    ('Surface pattern', 'pattern_slope_limit', 'Skip slopes over', 'float', 0, {'unit': 'deg', 'min': 0, 'max': 90,
+        'help': 'No pattern where the wall leans more than this from vertical, in or out (a shoulder, a dome, a '
+                'chamfer); it fades out over 5 degrees. 0 = off.'}),
     ('Surface pattern', 'pattern_points', 'Points per wave', 'int', 12, {'min': 2, 'max': 200,
         'help': 'Path points in each wave (the sharp tips of zigzag and spikes always get one). More = smoother sine, '
                 'but more robot moves: use corner blending. image: a point every Wavelength / Points per wave mm.'}),

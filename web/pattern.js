@@ -16,6 +16,7 @@ export function initPattern(ctx) {
     ['pattern_seed', 'Variation', 0, 50, 1, ['noise']],
     ['pattern_image_angle', 'Centre at', -180, 180, 5, ['image']],
     ['pattern_image_span', 'Width', 10, 360, 5, ['image']],
+    ['pattern_slope_limit', 'Skip slopes over', 0, 90, 1, null],
   ];
   const DEFAULT_LABEL = { pattern_wavelength: 'Wavelength', pattern_shift: 'Shift / layer', pattern_spike_width: 'Spike width' };
   const spec = (key) => app.spec.find((f) => f.key === key) || {};
@@ -98,6 +99,10 @@ export function initPattern(ctx) {
     const brushRow = numberRow('pattern_brush', 1, 100, 1);
     brushRow.querySelector('label').textContent = 'Brush size';
     $('patPaint').insertBefore(brushRow, $('patPaint').querySelector('.row-btns'));
+    const fillRow = numberRow('pattern_fill_angle', 1, 90, 1);
+    fillRow.querySelector('label').textContent = 'Fill angle';
+    fillRow.hidden = true;
+    $('patPaint').insertBefore(fillRow, $('patPaint').querySelector('.row-btns'));
     $('patPaintMode').addEventListener('change', () => change('pattern_paint_mode', $('patPaintMode').value, true));
     initPaint();
   }
@@ -149,11 +154,16 @@ export function initPattern(ctx) {
     // paint
     $('patPaint').hidden = !on;
     $('patPaintMode').value = v.pattern_paint_mode;
-    for (const inp of $('patPaint').querySelectorAll('[data-key="pattern_brush"] input')) if (document.activeElement !== inp) inp.value = v.pattern_brush;
+    for (const key of ['pattern_brush', 'pattern_fill_angle']) {
+      for (const inp of $('patPaint').querySelectorAll(`[data-key="${key}"] input`)) if (document.activeElement !== inp) inp.value = v[key];
+    }
+    $('patPaint').querySelector('[data-key="pattern_brush"]').hidden = paint.mode === 'fill';
+    $('patPaint').querySelector('[data-key="pattern_fill_angle"]').hidden = paint.mode !== 'fill';
     const n = paint.mode ? paint.pts.length : parsePts(v.pattern_paint).length;
-    $('patPaintCount').textContent = n ? `${n} painted points` : '';
+    const nf = countFaces(paint.mode ? paint.faces : parseFaces(v.pattern_faces));
+    $('patPaintCount').textContent = [n ? `${n} painted points` : '', nf ? `${nf} picked triangles` : ''].filter(Boolean).join(' · ');
     $('patPaintHint').textContent = paint.mode ? HINTS[paint.mode]
-      : (v.pattern_paint_mode !== 'everywhere' && !n ? 'Press Paint, then paint on the part.' : '');
+      : (v.pattern_paint_mode !== 'everywhere' && !n && !nf ? 'Press Paint or Fill, then mark the part.' : '');
     $('patState').textContent = app.busy ? 'updating…' : '';
     // the wave count chosen for each outline and the wavelength it gives (from the last slice)
     const rep = app.result?.stats?.pattern || [];
@@ -172,8 +182,39 @@ export function initPattern(ctx) {
   const HINTS = {
     paint: 'Left-drag on the part to paint. Right-drag turns the view. Enter or Done finishes, Esc cancels.',
     erase: 'Left-drag over painted areas to rub them out. Enter or Done finishes, Esc cancels.',
+    fill: 'Click a surface to pick it, Shift+click to unpick. Right-drag turns the view. Enter or Done finishes, Esc cancels.',
   };
-  const paint = { mode: null, pts: [], undo: [], before: null, active: false, showModelWas: null };
+  // pts: brush points (bed position); faces: {part id: Set of triangle indices} picked with Fill
+  const paint = { mode: null, pts: [], faces: {}, undo: [], before: null, active: false, showModelWas: null };
+  const parseFaces = (text) => {
+    const out = {};
+    for (const part of String(text || '').split(';')) {
+      const [pid, rng] = part.split(':');
+      if (rng === undefined || !Number.isFinite(Number(pid))) continue;
+      const set = new Set();
+      for (const r of rng.split(',')) {
+        const [a, b] = r.split('-').map(Number);
+        if (!Number.isFinite(a)) continue;
+        for (let i = a; i <= (Number.isFinite(b) ? b : a); i++) set.add(i);
+      }
+      if (set.size) out[Number(pid)] = set;
+    }
+    return out;
+  };
+  const formatFaces = (faces) => Object.keys(faces).map(Number).sort((a, b) => a - b).filter((pid) => faces[pid].size).map((pid) => {
+    const idx = [...faces[pid]].sort((a, b) => a - b), runs = [];
+    for (let i = 0; i < idx.length; i++) {
+      let j = i;
+      while (j + 1 < idx.length && idx[j + 1] === idx[j] + 1) j++;
+      runs.push(i === j ? String(idx[i]) : `${idx[i]}-${idx[j]}`);
+      i = j;
+    }
+    return `${pid}:${runs.join(',')}`;
+  }).join('; ');
+  const countFaces = (faces) => Object.values(faces).reduce((n, s) => n + s.size, 0);
+  const copyFaces = (faces) => Object.fromEntries(Object.entries(faces).map(([k, s]) => [k, new Set(s)]));
+  const snap = () => ({ pts: paint.pts.slice(), faces: copyFaces(paint.faces) });
+  const back = (u) => { paint.pts = u.pts; paint.faces = u.faces; };
   const parsePts = (text) => String(text || '').split(';').map((p) => p.split(',').map(Number))
     .filter((p) => p.length >= 3 && p.every(Number.isFinite)).map((p) => p.slice(0, 3));
   const brush = () => Math.max(Number(app.values.pattern_brush) || 15, 0.5);
@@ -186,10 +227,25 @@ export function initPattern(ctx) {
     }
     const v = app.values || {};
     const pts = paint.mode ? paint.pts : parsePts(v.pattern_paint);
+    const faces = paint.mode ? paint.faces : parseFaces(v.pattern_faces);
     const shown = paint.mode || (v.pattern && v.pattern !== 'none' && v.pattern_paint_mode !== 'everywhere');
-    if (!shown || (!pts.length && !hover) || !view.mesh) return;
+    if (!shown || (!pts.length && !countFaces(faces) && !hover) || !view.mesh) return;
     const g = new THREE.Group();
     const col = palette().seam, r = brush();
+    for (const [pid, set] of Object.entries(faces)) {   // picked surfaces: the part's own triangles, tinted
+      const part = view.parts && view.parts[pid];
+      if (!part || !set.size) continue;
+      const src = part.geometry.attributes.position.array, n = src.length / 9;
+      const pos = new Float32Array(set.size * 9);
+      let k = 0;
+      for (const i of set) if (i < n) { pos.set(src.subarray(i * 9, i * 9 + 9), k * 9); k++; }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, k * 9), 3));
+      const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: paint.mode ? 0.5 : 0.25,
+        side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+      mesh.renderOrder = 7;
+      g.add(mesh);
+    }
     if (pts.length) {
       const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: paint.mode ? 0.35 : 0.12, depthWrite: false });
       const inst = new THREE.InstancedMesh(new THREE.SphereGeometry(r, 14, 10), mat, pts.length);
@@ -213,21 +269,26 @@ export function initPattern(ctx) {
   function initPaint() {
     const canvas = view.renderer.domElement, ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
     const defaults = { ...view.controls.mouseButtons };
-    const hit = (ev) => {
+    const hitFace = (ev) => {
       if (!view.mesh) return null;
       const r = canvas.getBoundingClientRect();
       ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
       ray.setFromCamera(ndc, view.camera);
       view.modelMat.side = THREE.DoubleSide;
-      const h = ray.intersectObject(view.mesh, true)[0];
+      return ray.intersectObject(view.mesh, true)[0] || null;
+    };
+    const hit = (ev) => {
+      const h = hitFace(ev);
       return h ? [h.point.x, h.point.y, h.point.z - view.mesh.position.z] : null;   // model position (no raft)
     };
     const setTool = (m) => {
       paint.mode = m;
       $('patPaintBtn').classList.toggle('on', m === 'paint');
       $('patEraseBtn').classList.toggle('on', m === 'erase');
+      $('patFillBtn').classList.toggle('on', m === 'fill');
       $('patPaintBtn').textContent = m === 'paint' ? 'Done' : 'Paint';
       $('patEraseBtn').textContent = m === 'erase' ? 'Done' : 'Erase';
+      $('patFillBtn').textContent = m === 'fill' ? 'Done' : 'Fill';
       $('patPaintUndo').hidden = !m;
       view.controls.mouseButtons = m ? { LEFT: null, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE } : { ...defaults };
       canvas.style.cursor = m ? 'crosshair' : '';
@@ -244,18 +305,25 @@ export function initPattern(ctx) {
     };
     const start = (m) => {
       if (paint.mode === m) return finish();
-      if (!paint.mode) { paint.pts = parsePts(app.values.pattern_paint); paint.before = paint.pts.slice(); paint.undo = []; }
+      if (!paint.mode) {
+        paint.pts = parsePts(app.values.pattern_paint);
+        paint.faces = parseFaces(app.values.pattern_faces);
+        paint.before = snap(); paint.undo = [];
+      }
       setTool(m);
     };
     const finish = () => {
       const text = paint.pts.map((p) => p.map((c) => c.toFixed(1)).join(',')).join('; ');
-      const changed = text !== (app.values.pattern_paint || '');
+      const ftext = formatFaces(paint.faces);
+      const changed = text !== (app.values.pattern_paint || ''), fchanged = ftext !== (app.values.pattern_faces || '');
       setTool(null);
-      if (!changed) return;
-      if (text && app.values.pattern_paint_mode === 'everywhere') setSetting('pattern_paint_mode', 'painted');
-      change('pattern_paint', text, true);
+      if (!changed && !fchanged) return;
+      if ((text || ftext) && app.values.pattern_paint_mode === 'everywhere') setSetting('pattern_paint_mode', 'painted');
+      if (changed && fchanged) setSetting('pattern_paint', text);
+      if (fchanged) change('pattern_faces', ftext, true);
+      else change('pattern_paint', text, true);
     };
-    const cancel = () => { paint.pts = paint.before || []; setTool(null); };
+    const cancel = () => { if (paint.before) back(paint.before); setTool(null); };
     const dab = (p) => {
       if (paint.mode === 'paint') {
         const last = paint.pts[paint.pts.length - 1];
@@ -264,20 +332,48 @@ export function initPattern(ctx) {
       } else {
         const r = brush();
         paint.pts = paint.pts.filter((q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) > r);
+        // picked triangles whose middle is under the brush
+        for (const [pid, set] of Object.entries(paint.faces)) {
+          const pos = view.parts?.[pid]?.geometry.attributes.position.array;
+          if (!pos) continue;
+          for (const i of [...set]) {
+            const o = i * 9;
+            const cx = (pos[o] + pos[o + 3] + pos[o + 6]) / 3, cy = (pos[o + 1] + pos[o + 4] + pos[o + 7]) / 3, cz = (pos[o + 2] + pos[o + 5] + pos[o + 8]) / 3;
+            if (Math.hypot(p[0] - cx, p[1] - cy, p[2] - cz) <= r) set.delete(i);
+          }
+        }
       }
+    };
+    const fill = async (ev) => {
+      const h = hitFace(ev);
+      if (!h || h.faceIndex == null) return;
+      const pid = h.object.userData.id;
+      try {
+        const res = await (await api('/api/object/fill', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: pid, tri: h.faceIndex, angle: Number(app.values.pattern_fill_angle) || 30 }) })).json();
+        if (paint.mode !== 'fill') return;
+        paint.undo.push(snap());
+        const set = paint.faces[pid] || (paint.faces[pid] = new Set());
+        for (const i of res.faces) { if (ev.shiftKey) set.delete(i); else set.add(i); }
+        show();
+      } catch (e) { toast('Fill: ' + e.message, 'error'); }
     };
     $('patPaintBtn').addEventListener('click', () => start('paint'));
     $('patEraseBtn').addEventListener('click', () => start('erase'));
-    $('patPaintUndo').addEventListener('click', () => { if (paint.undo.length) { paint.pts = paint.undo.pop(); show(); } });
+    $('patFillBtn').addEventListener('click', () => start('fill'));
+    $('patPaintUndo').addEventListener('click', () => { if (paint.undo.length) { back(paint.undo.pop()); show(); } });
     $('patPaintClear').addEventListener('click', () => {
-      if (paint.mode) { paint.undo.push(paint.pts.slice()); paint.pts = []; show(); return; }
-      if (app.values.pattern_paint) change('pattern_paint', '', true);
+      if (paint.mode) { paint.undo.push(snap()); paint.pts = []; paint.faces = {}; show(); return; }
+      if (app.values.pattern_paint && app.values.pattern_faces) setSetting('pattern_paint', '');
+      if (app.values.pattern_faces) change('pattern_faces', '', true);
+      else if (app.values.pattern_paint) change('pattern_paint', '', true);
     });
     canvas.addEventListener('pointerdown', (ev) => {
       if (!paint.mode || ev.button !== 0) return;
+      if (paint.mode === 'fill') { ev.stopImmediatePropagation(); fill(ev); return; }
       const p = hit(ev);
       if (!p) return;
-      paint.undo.push(paint.pts.slice());
+      paint.undo.push(snap());
       dab(p);
       paint.active = true;
       canvas.setPointerCapture(ev.pointerId);
@@ -285,7 +381,7 @@ export function initPattern(ctx) {
       ev.stopImmediatePropagation();
     }, true);
     canvas.addEventListener('pointermove', (ev) => {
-      if (!paint.mode) return;
+      if (!paint.mode || paint.mode === 'fill') return;
       const p = hit(ev);
       if (p && paint.active) dab(p);
       cancelAnimationFrame(paint.frame);
@@ -306,6 +402,6 @@ export function initPattern(ctx) {
 
   app.hooks.push((f) => { if (f.key && f.key.startsWith('pattern')) show(); });
   // Ctrl+Z while painting takes back the last stroke (true = handled)
-  const undoStroke = () => { if (!paint.mode) return false; if (paint.undo.length) { paint.pts = paint.undo.pop(); show(); } return true; };
+  const undoStroke = () => { if (!paint.mode) return false; if (paint.undo.length) { back(paint.undo.pop()); show(); } return true; };
   return { show, painting: () => !!paint.mode, undoStroke };
 }

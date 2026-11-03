@@ -95,6 +95,10 @@ class Plate:
         for p in self.parts:
             self._place(p, s)
 
+    def counts(self):
+        """[(id, triangle count)] in the order of triangles()."""
+        return [(p['id'], len(p['placed'])) for p in self.parts]
+
     def triangles(self):
         """All parts on the bed, one (n, 3, 3) array (None when empty)."""
         if not self.parts:

@@ -66,6 +66,7 @@ class Planner:
         self._spiral_state = {}  # spiral vase: lap count carried from turn to turn (surface pattern phase)
         self._outer = (None, [])  # (layer, its outer wall loops): tells holes from outer boundaries
         self.pattern_ctx = None   # surface pattern: part centre, picture, paint (pattern.context)
+        self.pattern_surface = None   # ... the part's surface for the slope and picked-surface masks
 
     def _air_sign(self, path, layer):
         """+1 if the air is outside this CCW outer wall loop (an outer boundary), -1 if inside it (a hole)."""
@@ -370,7 +371,7 @@ class Planner:
 
     def plan(self, layers):
         if surface_pattern.active(self.s):
-            self.pattern_ctx = surface_pattern.context(self.s, layers)
+            self.pattern_ctx = surface_pattern.context(self.s, layers, self.pattern_surface)
         for li, layer in enumerate(layers):
             if self.seams:
                 self.prev_seams, self.seams = self.seams, {}
@@ -452,8 +453,12 @@ def toolpath_from_rows(rows, layer_z, s, warnings=()):
     return tp
 
 
-def plan_layers(slice_result, s):
+def plan_layers(slice_result, s, tris=None, faces=None):
+    """tris, faces: the part's surface and the triangles picked on it, for the surface pattern's slope and
+    picked-surface masks."""
     planner = Planner(s)
+    if tris is not None and surface_pattern.active(s) and surface_pattern.needs_surface(s, faces is not None):
+        planner.pattern_surface = surface_pattern.surface(tris, faces)
     rows = planner.plan(slice_result.layers)
     tp = toolpath_from_rows(rows, [l.z for l in slice_result.layers], s, slice_result.warnings)
     if planner.pattern_ctx and planner.pattern_ctx.get('report'):

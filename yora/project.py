@@ -59,7 +59,7 @@ def save(plate, s, name):
         for i, p in enumerate(plate.parts):
             fn = 'parts/%d.stl' % (i + 1)
             z.writestr(fn, mesh.to_stl_bytes(p['raw']))
-            parts.append({'name': p['name'], 'file': fn, 'transform': p['transform']})
+            parts.append({'name': p['name'], 'file': fn, 'transform': p['transform'], 'id': p['id']})
         files = []
         for folder, fname, path in linked_files(s):
             arc = 'profiles/%s/%s' % (folder, fname)
@@ -87,7 +87,7 @@ def load(data):
         if meta.get('format') != FORMAT:
             raise ValueError('Unknown project format: %s' % meta.get('format'))
         names = set(z.namelist())
-        parts = []
+        parts, ids = [], []
         for p in meta.get('parts', []):
             fn = str(p.get('file', ''))
             if fn not in names:
@@ -98,6 +98,7 @@ def load(data):
                          'rotation': [float(v) for v in t.get('rotation', [0] * 3)],
                          'center': [float(v) for v in t['center']] if t.get('center') else None}
             parts.append((str(p.get('name') or 'part'), raw, transform))
+            ids.append(p.get('id'))
         notes = []
         for arc in names:
             bits = arc.split('/')
@@ -118,4 +119,4 @@ def load(data):
                 f.write(content)
             notes.append('Added %s/%s from the project.' % (bits[1], fname))
     return {'name': safe_name(meta.get('name')), 'settings': settings.normalize(meta.get('settings')),
-            'parts': parts, 'notes': sorted(notes)}
+            'parts': parts, 'ids': ids, 'notes': sorted(notes)}

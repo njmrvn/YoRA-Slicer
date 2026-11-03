@@ -169,10 +169,12 @@ def run_slice(s):
     try:
         def progress(stage, frac):
             task['stage'], task['progress'] = stage, float(frac)
+        from . import pattern
         with STATE.lock:
             STATE.place(s)
             model = STATE.model
-        tp = slice_to_toolpath(model, s, progress, cache=STATE.slice_cache)
+            faces = pattern.face_flags(s.get('pattern_faces', ''), STATE.plate.counts())
+        tp = slice_to_toolpath(model, s, progress, cache=STATE.slice_cache, faces=faces)
         with STATE.lock:
             STATE.toolpath = tp
             STATE.source = 'slice'
@@ -367,6 +369,8 @@ class Handler(BaseHTTPRequestHandler):
                 with STATE.lock:
                     STATE.plate.restore(b.get('parts') or [], s)
                     return self.send_json(STATE.changed(s))
+            if url.path == '/api/object/fill':
+                return self.post_object_fill()
             if url.path in ('/api/object/delete', '/api/object/duplicate', '/api/object/clear'):
                 return self.post_object_action(url.path.rsplit('/', 1)[1])
             if url.path == '/api/project/save':
@@ -544,6 +548,21 @@ class Handler(BaseHTTPRequestHandler):
             STATE.plate.update(pid, transform, s)
             return self.send_json(STATE.changed(s))
 
+    def post_object_fill(self):
+        """Fill tool: the triangles of a part reached from the clicked one without crossing an edge sharper than
+        the fill angle. Body: {id, tri, angle}. Returns {id, faces: [triangle indices]}."""
+        from . import pattern
+        b = self.json_body()
+        with STATE.lock:
+            p = STATE.plate.find(int(b['id']))
+            tris = p['placed']
+            key = (p['id'], id(p['raw']))
+        seed = int(b['tri'])
+        if not 0 <= seed < len(tris):
+            return self.fail('No such triangle')
+        faces = pattern.fill_region(tris, seed, float(b.get('angle', 30)), cache_key=key)
+        return self.send_json({'id': p['id'], 'faces': faces.tolist()})
+
     def post_object_action(self, action):
         b = self.json_body()
         s = settings.normalize(b.get('settings'))
@@ -577,8 +596,14 @@ class Handler(BaseHTTPRequestHandler):
         s = p['settings']
         with STATE.lock:
             STATE.plate.clear(forget=True)
-            for name, raw, transform in p['parts']:
-                STATE.plate.add(name, raw, s, transform)
+            ids = {}
+            for (name, raw, transform), old in zip(p['parts'], p.get('ids') or [None] * len(p['parts'])):
+                part = STATE.plate.add(name, raw, s, transform)
+                if old is not None:
+                    ids[int(old)] = part['id']
+            if s.get('pattern_faces'):   # the parts get new ids: the picked surfaces follow them
+                from . import pattern
+                s['pattern_faces'] = pattern.remap_faces(s['pattern_faces'], ids)
             STATE.job_name = robot.safe_name(p['name'])
             STATE.toolpath = None
             STATE.slice_cache = {}
