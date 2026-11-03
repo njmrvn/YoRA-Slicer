@@ -372,17 +372,16 @@ class FillTest(unittest.TestCase):
         tris = box()
         n = pattern.normals(tris)
         picked = pattern.fill_region(tris, int(np.nonzero(n[:, 0] > 0.99)[0][0]), 30)
-        flags = np.zeros(len(tris), dtype=bool)
-        flags[picked] = True
         tp = yora.slice_to_toolpath(tris, settings.normalize({
             'layer_height': 4, 'first_layer_height': 4, 'line_width': 5, 'walls': 1, 'infill_density': 0,
             'top_layers': 0, 'bottom_layers': 0, 'pattern': 'sine', 'pattern_amplitude': 4, 'pattern_wavelength': 20,
-            'pattern_paint_mode': 'painted'}), faces=flags)
+            'pattern_paint_mode': 'painted', 'pattern_faces': pattern.format_faces({1: picked})}), parts=[(1, len(tris))])
         xy, _ = outer(tp, 5)
         px = xy[(xy[:, 0] > C[0] + 90) & (np.abs(xy[:, 1] - C[1]) < 80)]    # middle of the +X side
-        mx = xy[(xy[:, 0] < C[0] - 90) & (np.abs(xy[:, 1] - C[1]) < 80)]    # middle of the -X side
+        mx = xy[xy[:, 0] < C[0] - 90]                                       # the -X side
         self.assertGreater(np.ptp(px[:, 0]), 3.0)                           # waves on the picked side
         self.assertLess(np.ptp(mx[:, 0]), 0.01)                             # plain on the other
+        self.assertLessEqual(len(mx), 2)                                    # ... with only its own corner points
 
     def test_slope_limit(self):
         steep = cone(150, 150 - 120 * math.tan(math.radians(30)), 120)     # wall leaning 30 degrees
@@ -390,3 +389,75 @@ class FillTest(unittest.TestCase):
         self.assertGreater(ptp(job(steep, pattern='sine', pattern_slope_limit=40)), 3.0)
         self.assertLess(ptp(job(steep, pattern='sine', pattern_slope_limit=20)), 0.5)
         self.assertGreater(ptp(job(tube(150, 0, 120), pattern='sine', pattern_slope_limit=20)), 3.0)   # upright
+
+
+class LayersTest(unittest.TestCase):
+    """Several patterns on one part (pattern_layers)."""
+
+    def run_box(self, layers, **kw):
+        import json
+        tris = box()
+        n = pattern.normals(tris)
+        side = pattern.fill_region(tris, int(np.nonzero(n[:, 0] > 0.99)[0][0]), 30)
+        for d in layers:
+            if d.get('pattern_faces') == 'SIDE':
+                d['pattern_faces'] = pattern.format_faces({1: side})
+        s = settings.normalize(dict({
+            'layer_height': 4, 'first_layer_height': 4, 'line_width': 5, 'walls': 1, 'infill_density': 0,
+            'top_layers': 0, 'bottom_layers': 0, 'pattern': 'sine', 'pattern_amplitude': 2, 'pattern_wavelength': 20,
+            'pattern_layers': json.dumps(layers)}, **kw))
+        tp = yora.slice_to_toolpath(tris, s, parts=[(1, len(tris))])
+        xy, _ = outer(tp, 5)
+        plus = xy[(xy[:, 0] > C[0] + 90) & (np.abs(xy[:, 1] - C[1]) < 60)]
+        minus = xy[(xy[:, 0] < C[0] - 90) & (np.abs(xy[:, 1] - C[1]) < 95)]   # the -X side, not the Y sides
+        return tp, xy, np.ptp(plus[:, 0]), (np.ptp(minus[:, 0]) if len(minus) else 0.0)
+
+    def test_cover_on_a_picked_face(self):
+        _, xy, plus, minus = self.run_box([{'pattern': 'zigzag', 'pattern_amplitude': 8, 'pattern_wavelength': 30,
+                                            'pattern_paint_mode': 'painted', 'pattern_faces': 'SIDE'}])
+        self.assertAlmostEqual(plus, 8.0, delta=0.3)                  # layer 2 on its face
+        self.assertAlmostEqual(minus, 2.0, delta=0.2)                 # layer 1 everywhere else
+        seg = np.hypot(*np.diff(xy, axis=0).T)
+        self.assertGreater(seg.min(), 0.4 * np.median(seg))           # no very short moves where the layers meet
+
+    def test_add_and_hide(self):
+        _, _, plus, minus = self.run_box([{'pattern': 'sine', 'pattern_amplitude': 3, 'pattern_wavelength': 20,
+                                           'pattern_blend': 'add'}])
+        self.assertAlmostEqual(plus, 5.0, delta=0.3)                  # same waves added: 2 + 3
+        _, _, plus, minus = self.run_box([{'pattern': 'zigzag', 'pattern_amplitude': 8, 'pattern_hidden': True}])
+        self.assertAlmostEqual(plus, 2.0, delta=0.2)                  # hidden: only layer 1
+        _, _, plus, minus = self.run_box([{'pattern': 'zigzag', 'pattern_amplitude': 8, 'pattern_wavelength': 30,
+                                           'pattern_paint_mode': 'painted', 'pattern_faces': 'SIDE'}],
+                                         pattern_hidden=True)
+        self.assertAlmostEqual(plus, 8.0, delta=0.3)                  # layer 1 hidden: plain wall but the face
+        self.assertLess(minus, 0.01)
+
+    def test_one_layer_unchanged(self):
+        a = job(tube(100, 0, 40), pattern='sine')
+        b = job(tube(100, 0, 40), pattern='sine', pattern_layers='[]')
+        np.testing.assert_array_equal(a.x, b.x)
+
+    def test_soften(self):
+        u = np.linspace(0, 100, 101)
+        m = (u >= 50).astype(float)
+        r = pattern.soften(u, m, 20, 100, False)
+        self.assertEqual(r[30], 0.0)
+        self.assertAlmostEqual(r[45], 0.275, places=6)                # edge half-way between 49 and 50
+        self.assertAlmostEqual(r[55], 0.775, places=6)
+        self.assertEqual(r[70], 1.0)
+        np.testing.assert_array_equal(pattern.soften(u, m, 0, 100, False), m)
+
+    def test_warnings_and_remap(self):
+        import json
+        s = settings.normalize({'pattern': 'sine', 'pattern_amplitude': 4, 'line_width': 5,
+                                'pattern_layers': json.dumps([{'pattern': 'sine', 'pattern_amplitude': 4,
+                                                               'pattern_wavelength': 20}])})
+        w = pattern.warnings(s)
+        self.assertTrue(any('layer 2 covers the whole wall' in x for x in w), w)
+        s['pattern_layers'] = json.dumps([{'pattern': 'sine', 'pattern_amplitude': 4, 'pattern_wavelength': 20,
+                                           'pattern_blend': 'add', 'pattern_faces': '3:1-4'}])
+        self.assertTrue(any('reach 8 mm deep' in x for x in pattern.warnings(s)))
+        s['pattern_faces'] = '3:7'
+        r = pattern.remap_all_faces(s, {3: 9})
+        self.assertEqual(r['pattern_faces'], '9:7')
+        self.assertEqual(json.loads(r['pattern_layers'])[0]['pattern_faces'], '9:1-4')

@@ -438,6 +438,14 @@ html:root[data-theme="yora"] .steps .step.active .num { background: var(--accent
 .pat-num { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .pat-num input { width: 100%; min-width: 0; height: 26px; padding: 0 6px; font-variant-numeric: tabular-nums; }
 .pat-num .unit { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+.pat-layers { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.pat-layers button { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--border); background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.pat-layers button.on { border-color: var(--accent); background: var(--accent-soft); }
+.pat-layers button.off { opacity: 0.5; text-decoration: line-through; }
+.pat-layers .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.pat-layer-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
+.pat-layer-tools select { flex: 1 1 120px; }
 .pat-type { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; margin-bottom: 10px; }
 .pat-row .chk { grid-column: 2 / 4; }
 .pat-image { margin-bottom: 10px; }

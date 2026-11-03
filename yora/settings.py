@@ -173,6 +173,15 @@ SPEC = [
                 'than this. Small = one flat face; larger = round over soft edges.'}),
     ('Surface pattern', 'pattern_faces', 'Picked surfaces', 'text', '', {'hidden': True,
         'help': 'Triangles picked with Fill, per part: id:a-b,c; ...'}),
+    ('Surface pattern', 'pattern_edge_blend', 'Edge blend', 'float', 10, {'unit': 'mm', 'min': 0, 'max': 1000,
+        'help': 'At the side edges of a picked surface the pattern fades in over this distance along the wall; a '
+                'cover layer cross-fades with the layer below. Top and bottom edges stay sharp. 0 = a sharp edge.'}),
+    ('Surface pattern', 'pattern_blend', 'Layer blend', 'choice', 'cover', {'options': ['cover', 'add'], 'hidden': True,
+        'help': 'Pattern layers 2 to 4: cover replaces the layers below where this one is; add puts its relief on top.'}),
+    ('Surface pattern', 'pattern_hidden', 'Hide this layer', 'bool', False, {'hidden': True,
+        'help': 'Pattern layer switched off (kept, not printed).'}),
+    ('Surface pattern', 'pattern_layers', 'Pattern layers', 'text', '', {'hidden': True,
+        'help': 'Layers 2 to 4 of the surface pattern (JSON list of their pattern settings).'}),
     ('Surface pattern', 'pattern_slope_limit', 'Skip slopes over', 'float', 0, {'unit': 'deg', 'min': 0, 'max': 90,
         'help': 'No pattern where the wall leans more than this from vertical, in or out (a shoulder, a dome, a '
                 'chamfer); it fades out over 5 degrees. 0 = off.'}),

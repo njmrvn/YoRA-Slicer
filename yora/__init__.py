@@ -20,10 +20,11 @@ def slice_key(tris, settings):
     return hashlib.sha1(np.ascontiguousarray(tris, dtype=np.float64).tobytes()).hexdigest(), keep
 
 
-def slice_to_toolpath(tris, settings, progress=None, cache=None, faces=None):
+def slice_to_toolpath(tris, settings, progress=None, cache=None, parts=None):
     """Mesh already placed on the bed -> Toolpath. cache: a dict kept between calls; when only plan-only settings
     (the surface pattern) changed since the last call, the sliced layers are reused and only the moves are planned.
-    faces: bool per triangle, surfaces picked for the surface pattern (pattern.face_flags)."""
+    parts: [(part id, triangle count)] in the order of tris, to find the surfaces picked for the surface pattern
+    (pattern_faces); None = one part with id 1."""
     from .strategy import is_angled, slice_angled
     from .overhang import annotate
     if is_angled(settings):
@@ -41,7 +42,7 @@ def slice_to_toolpath(tris, settings, progress=None, cache=None, faces=None):
             cache.update(key=key, result=result)
     if progress:
         progress('planning', 0.0)
-    tp = plan_layers(result, settings, tris, faces)
+    tp = plan_layers(result, settings, tris, parts)
     if progress:
         progress('planning', 1.0)
     return annotate(tp, settings)

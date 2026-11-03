@@ -220,6 +220,13 @@
       </section>
       <section class="card" id="patternPanel" hidden>
         <header class="card-head"><h2>Surface pattern</h2><span class="head-note" id="patState"></span></header>
+        <div class="pat-layers" id="patLayers" role="tablist" aria-label="Pattern layers"></div>
+        <div class="pat-layer-tools" id="patLayerTools" hidden>
+          <select id="patBlend" title="Cover: this layer replaces the layers below where it is. Add: its relief goes on top of them."><option value="cover">Cover below</option><option value="add">Add to below</option></select>
+          <button id="patHide" class="btn small" title="Switch this layer off without losing it">Hide</button>
+          <button id="patDup" class="btn small" title="A copy of this layer as a new layer">Duplicate</button>
+          <button id="patDel" class="btn small" title="Remove this layer">Delete</button>
+        </div>
         <div class="seg pat-type" id="patType" role="radiogroup" aria-label="Pattern">
           <button data-pattern="none">None</button><button data-pattern="sine">Sine</button><button data-pattern="zigzag">Zigzag</button><button data-pattern="spikes">Spikes</button><button data-pattern="bumps">Bumps</button><button data-pattern="noise">Noise</button><button data-pattern="image">Image</button>
         </div>

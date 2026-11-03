@@ -453,16 +453,18 @@ def toolpath_from_rows(rows, layer_z, s, warnings=()):
     return tp
 
 
-def plan_layers(slice_result, s, tris=None, faces=None):
-    """tris, faces: the part's surface and the triangles picked on it, for the surface pattern's slope and
+def plan_layers(slice_result, s, tris=None, parts=None):
+    """tris, parts: the part's surface and its parts [(id, triangle count)], for the surface pattern's slope and
     picked-surface masks."""
     planner = Planner(s)
-    if tris is not None and surface_pattern.active(s) and surface_pattern.needs_surface(s, faces is not None):
-        planner.pattern_surface = surface_pattern.surface(tris, faces)
+    if tris is not None and surface_pattern.active(s) and surface_pattern.needs_surface(s):
+        planner.pattern_surface = surface_pattern.surface(tris, parts)
     rows = planner.plan(slice_result.layers)
     tp = toolpath_from_rows(rows, [l.z for l in slice_result.layers], s, slice_result.warnings)
     if planner.pattern_ctx and planner.pattern_ctx.get('report'):
         tp.stats['pattern'] = planner.pattern_ctx['report']
+    if planner.pattern_ctx and planner.pattern_ctx.get('reports'):
+        tp.stats['pattern_layers'] = {str(n): r for n, r in planner.pattern_ctx['reports'].items()}
     if slice_result.raft:
         tp.stats['raft'] = slice_result.raft
     return tp

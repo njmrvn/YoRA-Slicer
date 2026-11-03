@@ -169,12 +169,11 @@ def run_slice(s):
     try:
         def progress(stage, frac):
             task['stage'], task['progress'] = stage, float(frac)
-        from . import pattern
         with STATE.lock:
             STATE.place(s)
             model = STATE.model
-            faces = pattern.face_flags(s.get('pattern_faces', ''), STATE.plate.counts())
-        tp = slice_to_toolpath(model, s, progress, cache=STATE.slice_cache, faces=faces)
+            parts = STATE.plate.counts()
+        tp = slice_to_toolpath(model, s, progress, cache=STATE.slice_cache, parts=parts)
         with STATE.lock:
             STATE.toolpath = tp
             STATE.source = 'slice'
@@ -601,9 +600,8 @@ class Handler(BaseHTTPRequestHandler):
                 part = STATE.plate.add(name, raw, s, transform)
                 if old is not None:
                     ids[int(old)] = part['id']
-            if s.get('pattern_faces'):   # the parts get new ids: the picked surfaces follow them
-                from . import pattern
-                s['pattern_faces'] = pattern.remap_faces(s['pattern_faces'], ids)
+            from . import pattern     # the parts get new ids: the picked surfaces (of every layer) follow them
+            s = pattern.remap_all_faces(s, ids)
             STATE.job_name = robot.safe_name(p['name'])
             STATE.toolpath = None
             STATE.slice_cache = {}
