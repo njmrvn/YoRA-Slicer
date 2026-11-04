@@ -9,6 +9,7 @@ import { initMaterials } from './material.js';
 import { initGizmo } from './gizmo.js';
 import { initPattern } from './pattern.js';
 import { initHistory } from './history.js';
+import { readStep } from './step.js';
 
 const $ = (id) => document.getElementById(id);
 const STORE_KEY = 'yora.settings.v1';
@@ -418,6 +419,25 @@ function setValues(vals) {
   if (matUI) matUI.show();
   if (robotUI) robotUI.rebuild();
 }
+// At start: painted and picked areas belong to the parts they were made on, and part numbers start again at 1 after a
+// restart, so areas of parts that are no longer on the bed must not land on the next model.
+function forgetStaleAreas(parts) {
+  const ids = new Set(parts.map((p) => p.id));
+  const keep = (text) => String(text || '').split(';').map((s) => s.trim()).filter((s) => s && ids.has(Number(s.split(':')[0]))).join('; ');
+  const v = { ...app.values };
+  v.pattern_faces = keep(v.pattern_faces);
+  if (!ids.size) v.pattern_paint = '';
+  if (v.pattern_paint_mode !== 'everywhere' && !v.pattern_faces && !v.pattern_paint) v.pattern_paint_mode = 'everywhere';
+  try {
+    const list = JSON.parse(v.pattern_layers || '[]');
+    for (const d of list) {
+      d.pattern_faces = keep(d.pattern_faces);
+      if (!ids.size) d.pattern_paint = '';
+    }
+    v.pattern_layers = list.length ? JSON.stringify(list) : '';
+  } catch (_) { v.pattern_layers = ''; }
+  if (['pattern_faces', 'pattern_paint', 'pattern_paint_mode', 'pattern_layers'].some((k) => v[k] !== app.values[k])) setValues(v);
+}
 function setDirty(d) {
   app.dirty = d;
   if (d) setStatusNote('Settings changed — slice again to update the toolpath.');
@@ -432,10 +452,13 @@ async function openFile(file) {
     return app.loadRobotFile?.(file);
   }
   const isGcode = ['gcode', 'gco', 'g', 'nc'].includes(ext);
-  const q = `name=${encodeURIComponent(file.name)}&settings=${encodeURIComponent(JSON.stringify(app.values))}`;
-  busy(true, isGcode ? 'Reading G-code…' : 'Loading model…');
+  const isStep = ['step', 'stp'].includes(ext);
+  // the settings go in the URL: not the painted and picked areas, which can be very long and are not needed here
+  const { pattern_paint, pattern_faces, pattern_layers, ...short } = app.values;
+  const q = `name=${encodeURIComponent(file.name)}&settings=${encodeURIComponent(JSON.stringify(short))}${isStep ? '&format=cad' : ''}`;
+  busy(true, isGcode ? 'Reading G-code…' : isStep ? 'Reading STEP file…' : 'Loading model…');
   try {
-    const body = await file.arrayBuffer();
+    const body = isStep ? await readStep(file) : await file.arrayBuffer();
     if (isGcode) {
       const res = await (await api('/api/gcode?' + q, { method: 'POST', body })).json();
       clearMesh();
@@ -461,7 +484,7 @@ async function openFile(file) {
       setMode('prepare');
       if (first) setView('iso');
       const added = res.model.parts.find((p) => p.id === res.added);
-      setStatusNote(`${file.name}: ${added.triangles.toLocaleString()} triangles` +
+      setStatusNote(`${file.name}: ${added.triangles.toLocaleString()} triangles` + (added.cad_faces ? `, ${added.cad_faces.toLocaleString()} CAD faces` : '') +
         (res.model.parts.length > 1 ? `, added as part ${res.model.parts.length}.` : '. Set the print settings, then Slice.'));
     }
   } catch (e) { toast(e.message, 'error'); } finally { busy(false); refreshButtons(); }
@@ -1606,7 +1629,9 @@ async function boot() {
   await loadProfiles();
   // a reload while the app keeps running: show the parts that are still on the bed
   try {
-    const plate = await (await api('/api/plate?settings=' + encodeURIComponent(JSON.stringify(app.values)))).json();
+    const { pattern_paint, pattern_faces, pattern_layers, ...short } = app.values;   // the long ones don't fit a URL
+    const plate = await (await api('/api/plate?settings=' + encodeURIComponent(JSON.stringify(short)))).json();
+    forgetStaleAreas(plate.model?.parts || []);
     if (plate.model) {
       app.model = plate.model;
       await loadMesh();
@@ -1618,6 +1643,7 @@ async function boot() {
   $('btnProjection').addEventListener('click', () => setProjection(view.camera !== view.ortho));
   try { if (localStorage.getItem('yora.projection') === 'ortho') setProjection(true); } catch (_) { /* storage blocked */ }
 
+  window.addEventListener('pagehide', () => navigator.sendBeacon('/api/closing'));   // the .exe stops with its window
   $('fileInput').addEventListener('change', async (e) => { const fs = [...e.target.files]; e.target.value = ''; for (const f of fs) await openFile(f); });
   (await (await api('/api/samples')).json()).forEach((f) => $('sampleSelect').add(new Option(f, f)));
   $('sampleSelect').addEventListener('change', async (e) => {

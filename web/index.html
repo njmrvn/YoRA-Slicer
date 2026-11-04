@@ -20,8 +20,8 @@
 <link rel="stylesheet" href="clay.css">
 <script type="importmap">
 { "imports": {
-  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  "three": "./vendor/three/three.module.js",
+  "three/addons/": "./vendor/three/addons/"
 } }
 </script>
 </head>
@@ -51,7 +51,7 @@
     <button id="tabExport" class="step" role="tab"><span class="num">5</span>Export</button>
   </nav>
   <div class="actions">
-    <label class="btn ghost" title="A YoRA project (.yora); STL, OBJ or 3MF to add to the bed; G-code to preview; a .robot robot model file for the robot"><svg class="ic"><use href="#i-open"/></svg>Open<input id="fileInput" type="file" multiple accept=".yora,.stl,.obj,.3mf,.gcode,.gco,.g,.nc,.robot" hidden></label>
+    <label class="btn ghost" title="A YoRA project (.yora); STEP, STL, OBJ or 3MF to add to the bed; G-code to preview; a .robot robot model file for the robot"><svg class="ic"><use href="#i-open"/></svg>Open<input id="fileInput" type="file" multiple accept=".yora,.step,.stp,.stl,.obj,.3mf,.gcode,.gco,.g,.nc,.robot" hidden></label>
     <button id="btnUndo" class="btn ghost icon-only" disabled aria-label="Undo" title="Undo (Ctrl+Z)"><svg class="ic"><use href="#i-undo"/></svg></button>
     <button id="btnRedo" class="btn ghost icon-only" disabled aria-label="Redo" title="Redo (Ctrl+Y)"><svg class="ic"><use href="#i-redo"/></svg></button>
     <button id="btnSaveProject" class="btn ghost" disabled title="Save the project (.yora): the parts, every setting and the files they use. Ctrl+S"><svg class="ic"><use href="#i-save"/></svg>Save</button>
@@ -149,7 +149,7 @@
       <section class="card" id="objectPanel">
         <header class="card-head"><h2>Parts</h2>
           <div class="head-actions">
-            <label class="btn small" title="Add a model (STL, OBJ, 3MF) to the bed">Add<input id="addInput" type="file" multiple accept=".stl,.obj,.3mf" hidden></label>
+            <label class="btn small" title="Add a model (STEP, STL, OBJ, 3MF) to the bed">Add<input id="addInput" type="file" multiple accept=".step,.stp,.stl,.obj,.3mf" hidden></label>
             <button id="btnDuplicate" class="btn small" disabled title="Put a copy of the selected part on the bed">Duplicate</button>
             <button id="btnDelete" class="btn small" disabled title="Remove the selected part (Delete key)">Remove</button>
           </div>
@@ -245,7 +245,7 @@
           <div class="pat-row"><label for="patPaintMode">Where</label><select id="patPaintMode"><option value="everywhere">Everywhere</option><option value="painted">Only painted areas</option><option value="unpainted">Except painted areas</option></select></div>
           <div class="row-btns">
             <button id="patPaintBtn" class="btn small" title="Paint on the part where the pattern should go">Paint</button>
-            <button id="patFillBtn" class="btn small" title="Click a surface to pick all of it at once: it spreads until an edge bends more than the fill angle">Fill</button>
+            <button id="patFillBtn" class="btn small" title="Click a surface to pick all of it at once. STEP parts: one CAD face. Other parts: it spreads until an edge bends more than the fill angle">Fill</button>
             <button id="patEraseBtn" class="btn small" title="Rub out painted areas">Erase</button>
             <button id="patPaintUndo" class="btn small" hidden>Undo</button>
             <button id="patPaintClear" class="btn small" title="Remove all painted areas and picked surfaces">Clear</button>

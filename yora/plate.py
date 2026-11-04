@@ -4,14 +4,15 @@ import copy
 
 import numpy as np
 
-from . import mesh
+from . import mesh, pattern
 
 GAP = 10.0   # mm kept free between a new part and the parts already on the bed
 
 
 class Plate:
     def __init__(self):
-        self.parts = []          # dicts: id, name, raw (triangles as loaded), transform, placed (on the bed)
+        self.parts = []          # dicts: id, name, raw (triangles as loaded), transform, placed (on the bed),
+        #                          cad_faces (CAD face number per triangle of a STEP part, else None)
         self.next_id = 1
         self.removed = {}        # id -> removed part, so undo can put it back (restore)
 
@@ -30,11 +31,11 @@ class Plate:
         center = t['center'] or [s['bed_x'] / 2, s['bed_y'] / 2]
         p['placed'] = mesh.place(p['raw'], t['scale'], t['rotation'], center)
 
-    def add(self, name, raw, s, transform=None):
+    def add(self, name, raw, s, transform=None, cad_faces=None):
         """Add a part. Without a position (center None) it is set down in a free spot on the bed: the middle when the
         bed is empty or the middle is free."""
         t = copy.deepcopy(transform) if transform else {'scale': [100, 100, 100], 'rotation': [0, 0, 0], 'center': None}
-        p = {'id': self.next_id, 'name': name, 'raw': raw, 'transform': t}
+        p = {'id': self.next_id, 'name': name, 'raw': raw, 'transform': t, 'cad_faces': cad_faces}
         self.next_id += 1
         self._place(p, s)
         if t.get('center') is None and self.parts:
@@ -60,7 +61,18 @@ class Plate:
         p = self.find(pid)
         t = copy.deepcopy(p['transform'])
         t['center'] = None
-        return self.add(p['name'], p['raw'], s, t)
+        return self.add(p['name'], p['raw'], s, t, p.get('cad_faces'))
+
+    def pick(self, pid, tri, angle=30.0, spread=False):
+        """Fill tool: the triangles of a part picked by a click on triangle tri. A STEP part: its whole CAD face;
+        spread, or any other part: everything reached without crossing an edge sharper than angle."""
+        p = self.find(pid)
+        if not 0 <= tri < len(p['placed']):
+            raise ValueError('No such triangle')
+        cad = p.get('cad_faces')
+        if cad is not None and not spread:
+            return np.nonzero(cad == cad[tri])[0]
+        return pattern.fill_region(p['placed'], tri, angle, cache_key=(p['id'], id(p['raw'])))
 
     def clear(self, forget=False):
         """Take every part off the bed (kept for undo unless forget: a new project or G-code)."""
@@ -112,7 +124,9 @@ class Plate:
         for p in self.parts:
             lo, hi = mesh.bounds(p['placed'])
             n = len(p['placed'])
+            cad = p.get('cad_faces')
             parts.append({'id': p['id'], 'name': p['name'], 'triangles': int(n), 'start': start,
+                          'cad_faces': 0 if cad is None else int(len(np.unique(cad))),
                           'min': lo.tolist(), 'max': hi.tolist(), 'size': (hi - lo).tolist(),
                           'fits': fits(lo, hi, s), 'transform': p['transform']})
             start += n

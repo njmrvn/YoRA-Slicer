@@ -19,12 +19,30 @@ def load_mesh(data, filename):
     elif ext == '.3mf':
         tris = _load_3mf(data)
     else:
-        raise ValueError('Unsupported model format: %s (use STL, OBJ or 3MF)' % ext)
+        raise ValueError('Unsupported model format: %s (use STEP, STL, OBJ or 3MF)' % ext)
     tris = np.asarray(tris, dtype=np.float64).reshape(-1, 3, 3)
     tris = tris[np.isfinite(tris).all(axis=(1, 2))]
     if len(tris) == 0:
         raise ValueError('The model has no triangles')
     return tris
+
+
+def load_cad(data):
+    """A STEP file already turned into triangles by the page (web/step.js): uint32 n, n uint32 CAD face numbers, then
+    n * 9 float32 vertices, little endian. Returns (tris, face number per triangle)."""
+    if len(data) < 4:
+        raise ValueError('The STEP file has no surfaces to print (only wires or points?)')
+    n = int(np.frombuffer(data, dtype='<u4', count=1)[0])
+    if n == 0:
+        raise ValueError('The STEP file has no surfaces to print (only wires or points?)')
+    if len(data) != 4 + 4 * n + 36 * n:
+        raise ValueError('The STEP model did not arrive in one piece')
+    faces = np.frombuffer(data, dtype='<u4', count=n, offset=4).astype(np.int64)
+    tris = np.frombuffer(data, dtype='<f4', count=9 * n, offset=4 + 4 * n).astype(np.float64).reshape(-1, 3, 3)
+    ok = np.isfinite(tris).all(axis=(1, 2))
+    if not ok.any():
+        raise ValueError('The model has no triangles')
+    return tris[ok], faces[ok]
 
 
 def _load_stl(data):

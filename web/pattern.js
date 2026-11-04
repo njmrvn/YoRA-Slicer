@@ -270,7 +270,8 @@ export function initPattern(ctx) {
     const n = paint.mode ? paint.pts.length : parsePts(v.pattern_paint).length;
     const nf = countFaces(paint.mode ? paint.faces : parseFaces(v.pattern_faces));
     $('patPaintCount').textContent = [n ? `${n} painted points` : '', nf ? `${nf} picked triangles` : ''].filter(Boolean).join(' · ');
-    $('patPaintHint').textContent = paint.mode ? HINTS[paint.mode]
+    $('patPaintHint').textContent = paint.mode === 'fill' && app.model?.parts?.some((p) => p.cad_faces) ? HINTS.fillCad
+      : paint.mode ? HINTS[paint.mode]
       : (v.pattern_paint_mode !== 'everywhere' && !n && !nf ? 'Press Paint or Fill, then mark the part.' : '');
     $('patState').textContent = app.busy ? 'updating…' : '';
     // the wave count chosen for each outline and the wavelength it gives (from the last slice)
@@ -291,6 +292,7 @@ export function initPattern(ctx) {
     paint: 'Left-drag on the part to paint. Right-drag turns the view. Enter or Done finishes, Esc cancels.',
     erase: 'Left-drag over painted areas to rub them out. Enter or Done finishes, Esc cancels.',
     fill: 'Click a surface to pick it, Shift+click to unpick. Right-drag turns the view. Enter or Done finishes, Esc cancels.',
+    fillCad: 'Click a CAD face to pick it, Shift+click to unpick. Alt+click spreads over smooth edges, up to the fill angle. Right-drag turns the view. Enter or Done finishes, Esc cancels.',
   };
   // pts: brush points (bed position); faces: {part id: Set of triangle indices} picked with Fill
   const paint = { mode: null, pts: [], faces: {}, undo: [], before: null, active: false, showModelWas: null };
@@ -334,7 +336,7 @@ export function initPattern(ctx) {
       view.paintViz.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
       view.paintViz = null;
     }
-    if (!app.values || !view.mesh) return;
+    if (!app.values || !view.mesh || !paint.mode) return;   // the areas only show while Paint, Fill or Erase is on
     const g = new THREE.Group();
     // every layer's area: the layer being edited in its colour, the others grey
     for (let n = 1; n <= count(); n++) {
@@ -342,7 +344,7 @@ export function initPattern(ctx) {
       const editing = mine && paint.mode;
       if (!editing && (!v.pattern || v.pattern === 'none' || v.pattern_paint_mode === 'everywhere' || v.pattern_hidden)) continue;
       drawArea(g, editing ? paint.pts : parsePts(v.pattern_paint), editing ? paint.faces : parseFaces(v.pattern_faces),
-        mine ? layerColor(n) : '#8a8f98', mine ? (paint.mode ? 1 : 0.6) : 0.35, Math.max(Number(v.pattern_brush) || 15, 0.5));
+        mine ? layerColor(n) : '#8a8f98', mine ? 1 : 0.35, Math.max(Number(v.pattern_brush) || 15, 0.5));
     }
     const col = layerColor(cur), r = brush();
     if (hover) {   // the brush under the pointer
@@ -473,7 +475,7 @@ export function initPattern(ctx) {
       const pid = h.object.userData.id;
       try {
         const res = await (await api('/api/object/fill', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: pid, tri: h.faceIndex, angle: Number(vals().pattern_fill_angle) || 30 }) })).json();
+          body: JSON.stringify({ id: pid, tri: h.faceIndex, angle: Number(vals().pattern_fill_angle) || 30, spread: ev.altKey }) })).json();
         if (paint.mode !== 'fill') return;
         paint.undo.push(snap());
         const set = paint.faces[pid] || (paint.faces[pid] = new Set());

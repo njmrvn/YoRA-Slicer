@@ -12,9 +12,9 @@ import os
 
 import numpy as np
 
-from .settings import PROJECT_DIR
+from .settings import PROFILE_DIR
 
-ROBOTS_DIR = os.path.join(PROJECT_DIR, 'profiles', 'robots')
+ROBOTS_DIR = os.path.join(PROFILE_DIR, 'robots')
 
 
 # ---------------- small SE(3) helpers ----------------

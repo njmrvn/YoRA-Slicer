@@ -124,5 +124,48 @@ class ProjectTest(unittest.TestCase):
             self.assertEqual(os.listdir(d), [])
 
 
+class StepPartTest(unittest.TestCase):
+    """A STEP part: triangles from the page, with the CAD face of each one."""
+
+    def part(self):
+        tris = mesh.box_mesh(100, 80, 40)
+        faces = np.arange(len(tris)) // 2                                  # each side of the box: one CAD face
+        body = np.array([len(tris)], dtype='<u4').tobytes() + faces.astype('<u4').tobytes() + tris.astype('<f4').tobytes()
+        return tris, faces, body
+
+    def test_load_cad(self):
+        tris, faces, body = self.part()
+        got, cad = mesh.load_cad(body)
+        np.testing.assert_allclose(got, tris, atol=1e-5)
+        np.testing.assert_array_equal(cad, faces)
+        self.assertRaises(ValueError, mesh.load_cad, body[:-4])            # cut short
+        self.assertRaises(ValueError, mesh.load_cad, np.array([0], dtype='<u4').tobytes())   # only wires: no surfaces
+
+    def test_click_picks_the_cad_face(self):
+        tris, faces, _ = self.part()
+        s = settings.normalize(S)
+        plate = Plate()
+        p = plate.add('box.step', tris, s, cad_faces=faces)
+        np.testing.assert_array_equal(plate.pick(p['id'], 4), [4, 5])
+        self.assertEqual(len(plate.pick(p['id'], 4, 91.0, spread=True)), len(tris))        # Alt+click: over the edges
+        self.assertEqual(plate.info(s)['parts'][0]['cad_faces'], len(tris) // 2)
+        q = plate.duplicate(p['id'], s)
+        np.testing.assert_array_equal(plate.pick(q['id'], 4), [4, 5])
+        plain = plate.add('box.stl', tris, s)                              # no CAD faces: the flat side, by angle
+        self.assertEqual(plate.info(s)['parts'][2]['cad_faces'], 0)
+        self.assertEqual(len(plate.pick(plain['id'], 4)), 2)
+        self.assertRaises(ValueError, plate.pick, p['id'], len(tris))
+
+    def test_saved_in_the_project(self):
+        tris, faces, _ = self.part()
+        s = settings.normalize(S)
+        plate = Plate()
+        plate.add('box.step', tris, s, cad_faces=faces)
+        plate.add('plain.stl', tris, s)
+        p = project.load(project.save(plate, s, 'job'))
+        np.testing.assert_array_equal(p['cad_faces'][0], faces)
+        self.assertIsNone(p['cad_faces'][1])
+
+
 if __name__ == '__main__':
     unittest.main()

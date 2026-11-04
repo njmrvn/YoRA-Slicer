@@ -913,7 +913,8 @@ def _warnings_one(ls, tag):
         out.append(f'{tag}: no picture chosen (or the file is gone). Upload one in the Surface pattern card.')
     if (ls.get('pattern_paint_mode', 'everywhere') == 'painted' and parse_points(ls.get('pattern_paint', '')) is None
             and not parse_faces(ls.get('pattern_faces', ''))):
-        out.append(f'{tag}: "only painted areas" is chosen but nothing is painted, so the wall stays plain.')
+        what = 'this layer does not show' if 'layer' in tag else 'the wall stays plain'
+        out.append(f'{tag}: "only painted areas" is chosen but nothing is painted, so {what}.')
     return out
 
 

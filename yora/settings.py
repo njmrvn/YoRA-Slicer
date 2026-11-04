@@ -2,9 +2,15 @@
 import json
 import os
 import re
+import sys
 
-PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PROFILE_DIR = os.path.join(PROJECT_DIR, 'profiles')
+FROZEN = bool(getattr(sys, 'frozen', False))     # running as the packaged YoRA Slicer.exe (see Build exe.bat)
+# the app's own files (web, posts, samples); your files live next to them, or in your user folder for the .exe, whose
+# folder may not be writable
+PROJECT_DIR = sys._MEIPASS if FROZEN else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(os.path.expanduser('~'), '.yora') if FROZEN else PROJECT_DIR
+PROFILE_DIR = os.path.join(DATA_DIR, 'profiles')
+OUT_DIR = os.path.join(DATA_DIR, 'out')
 
 # (group, key, label, type, default, extra)
 # type: float | int | bool | choice | text. extra: unit, min, max, options, help

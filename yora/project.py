@@ -3,6 +3,7 @@
 A .yora file is a zip:
     project.json        format, app version, name, all settings, the parts (name, file, scale, rotation, position)
     parts/<n>.stl       each part as loaded (before scaling and rotating), binary STL
+    parts/<n>.faces     a STEP part: its CAD face number per triangle (int32)
     profiles/...        the files the settings point to, so the project opens complete elsewhere: the material,
                         the post-processor, the tool model, the surface pattern picture and the robot model
 
@@ -14,6 +15,8 @@ import json
 import os
 import re
 import zipfile
+
+import numpy as np
 
 from . import __version__, mesh, settings
 from .settings import PROFILE_DIR
@@ -60,6 +63,9 @@ def save(plate, s, name):
             fn = 'parts/%d.stl' % (i + 1)
             z.writestr(fn, mesh.to_stl_bytes(p['raw']))
             parts.append({'name': p['name'], 'file': fn, 'transform': p['transform'], 'id': p['id']})
+            if p.get('cad_faces') is not None:
+                parts[-1]['faces'] = 'parts/%d.faces' % (i + 1)
+                z.writestr(parts[-1]['faces'], np.asarray(p['cad_faces'], dtype='<i4').tobytes())
         files = []
         for folder, fname, path in linked_files(s):
             arc = 'profiles/%s/%s' % (folder, fname)
@@ -87,7 +93,7 @@ def load(data):
         if meta.get('format') != FORMAT:
             raise ValueError('Unknown project format: %s' % meta.get('format'))
         names = set(z.namelist())
-        parts, ids = [], []
+        parts, ids, cad_faces = [], [], []
         for p in meta.get('parts', []):
             fn = str(p.get('file', ''))
             if fn not in names:
@@ -99,6 +105,9 @@ def load(data):
                          'center': [float(v) for v in t['center']] if t.get('center') else None}
             parts.append((str(p.get('name') or 'part'), raw, transform))
             ids.append(p.get('id'))
+            ff = str(p.get('faces') or '')
+            cad = np.frombuffer(z.read(ff), dtype='<i4').astype(np.int64) if ff in names else None
+            cad_faces.append(cad if cad is not None and len(cad) == len(raw) else None)
         notes = []
         for arc in names:
             bits = arc.split('/')
@@ -119,4 +128,4 @@ def load(data):
                 f.write(content)
             notes.append('Added %s/%s from the project.' % (bits[1], fname))
     return {'name': safe_name(meta.get('name')), 'settings': settings.normalize(meta.get('settings')),
-            'parts': parts, 'ids': ids, 'notes': sorted(notes)}
+            'parts': parts, 'ids': ids, 'cad_faces': cad_faces, 'notes': sorted(notes)}

@@ -18,7 +18,7 @@ A slicer for large-format 3D printing with an industrial robot arm and a pellet 
 Your first print, step by step:
 
 1. **Set up the machine once.** In **Setup**, choose your robot, then your tool: its 3D model and the nozzle tip (TCP). Then the bed: its size and position. Under *Jog*, press **Go to bed corners**: green corners are reachable, red ones are not. Save it all as a robot cell so you only do this once.
-2. **Add your parts.** In **Prepare**, open an STL, OBJ or 3MF file (or a sample), and add more parts if you like. Click a part to select it; double-click it to move or turn it with the mouse.
+2. **Add your parts.** In **Prepare**, open a STEP, STL, OBJ or 3MF file (or a sample), and add more parts if you like. Click a part to select it; double-click it to move or turn it with the mouse.
 3. **Choose how it prints.** Pick a material, then set the layer height, walls, infill and seam. **Essentials** shows the main settings, **All** shows every setting.
 4. **Slice.** Press **Slice**. In **Preview**, drag the layer slider to look inside, colour the toolpath by overhang to find steep walls, and try a surface pattern if you want texture.
 5. **Check the robot.** In **Robot check**, press **Check robot path**. Fix anything marked red (reach, limits, collisions), then play the simulation.
@@ -29,6 +29,7 @@ Press **Save** (Ctrl+S) to keep everything as a `.yora` project, and **Ctrl+Z** 
 ## Features
 
 - Walls, infill, brim, raft and spiral vase
+- STEP, STL, OBJ and 3MF import
 - Several parts on the bed: add, duplicate and arrange them
 - Project files (`.yora`): the parts, every setting and the files they use, in one file
 - Angled layers for printing overhangs without supports
@@ -50,7 +51,7 @@ Add texture to a part without changing the model. After slicing, open the **Surf
 - **Bumps** and **noise**: rows of domes or a random relief.
 - **Image**: wrap a PNG or JPG (a logo or a texture) around the part.
 - **Paint**: brush the pattern onto just the areas you want, or keep it off them.
-- **Fill**: click a surface to pick all of it at once. It spreads over the part until an edge bends more than the fill angle, so one click picks a flat side or the whole round body of a vase. Picked surfaces move with the part.
+- **Fill**: click a surface to pick all of it at once. On a STEP part, one click picks one CAD face, and Alt+click also spreads over smooth edges. On STL, OBJ and 3MF parts it spreads until an edge bends more than the fill angle, so one click picks a flat side or the whole round body of a vase. Picked surfaces move with the part.
 - **Skip slopes over**: keep the pattern off walls that lean more than a set angle, such as a shoulder or a chamfer.
 
 <img src="docs/surface-pattern.png" width="640" alt="A vase with a woven sine pattern">
@@ -77,6 +78,14 @@ Needs Windows and Python 3.10 or newer.
 
 After updating YoRA, close its window and start `YoRA Slicer.bat` again.
 
+## Build the .exe
+
+`Build exe.bat` packs YoRA Slicer into one folder that runs on a Windows PC without Python: start `YoRA Slicer.exe` in it. To give it to someone, zip the folder (`%USERPROFILE%\.yora\dist\YoRA Slicer`).
+
+It opens in its own Edge or Chrome window and stops when you close that window. It works offline. Your materials, posts, robots and tools are kept in `%USERPROFILE%\.yora\profiles`, not in the program folder, so they are not part of the zip. Windows may warn about a new unsigned program the first time.
+
 ## License
 
 GNU AGPL-3.0-or-later, see [LICENSE](LICENSE).
+
+STEP files are read with [occt-import-js](https://github.com/kovacsv/occt-import-js) and [Open CASCADE](https://dev.opencascade.org/), both under the LGPL 2.1. They are unchanged in `web/vendor/occt`, with their license texts.

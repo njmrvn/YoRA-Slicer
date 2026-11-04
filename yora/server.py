@@ -26,6 +26,7 @@ from . import slice_to_toolpath, __version__
 from .plate import Plate
 
 WEB_DIR = os.path.join(settings.PROJECT_DIR, 'web')
+mimetypes.add_type('application/wasm', '.wasm')
 CODE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -42,8 +43,10 @@ STARTED_CODE_TIME = code_time()
 
 
 def code_changed():
-    return code_time() > STARTED_CODE_TIME + 1.0
-OUT_DIR = os.path.join(settings.PROJECT_DIR, 'out')
+    return not settings.FROZEN and code_time() > STARTED_CODE_TIME + 1.0
+
+
+OUT_DIR = settings.OUT_DIR
 SAMPLES_DIR = os.path.join(settings.PROJECT_DIR, 'samples')
 
 
@@ -225,6 +228,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- routes ----
     def do_GET(self):
+        WINDOW['request'] = time.monotonic()
         url = urlparse(self.path)
         q = parse_qs(url.query)
         try:
@@ -347,6 +351,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.fail('%s: %s' % (type(e).__name__, e), 500)
 
     def do_POST(self):
+        WINDOW['request'] = time.monotonic()
         url = urlparse(self.path)
         q = parse_qs(url.query)
         try:
@@ -360,6 +365,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({'stopping': True, 'pid': os.getpid()})
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
                 return
+            if url.path == '/api/closing':              # the window is closing (or reloading, then it asks again)
+                WINDOW['closing'] = time.monotonic()
+                return self.send_json({})
             if url.path == '/api/object':
                 return self.post_object()
             if url.path == '/api/plate/restore':
@@ -521,13 +529,17 @@ class Handler(BaseHTTPRequestHandler):
         """A model file: added to the bed (replace=1: the bed is cleared first)."""
         name = os.path.basename(q.get('name', ['model.stl'])[0])
         s = settings.normalize(json.loads(q.get('settings', ['{}'])[0]))
-        tris = mesh.load_mesh(self.body(), name)
+        cad = None
+        if q.get('format', [''])[0] == 'cad':               # a STEP file, turned into triangles by the page
+            tris, cad = mesh.load_cad(self.body())
+        else:
+            tris = mesh.load_mesh(self.body(), name)
         with STATE.lock:
             if q.get('replace', ['0'])[0] == '1':
                 STATE.plate.clear()
             if not STATE.plate:
                 STATE.job_name = robot.safe_name(os.path.splitext(name)[0])
-            part = STATE.plate.add(name, tris, s)
+            part = STATE.plate.add(name, tris, s, cad_faces=cad)
             STATE.toolpath = None
             STATE.task = {'state': 'idle', 'stage': '', 'progress': 0.0, 'error': None, 'started': 0}
             return self.send_json(dict(STATE.changed(s), added=part['id']))
@@ -548,19 +560,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(STATE.changed(s))
 
     def post_object_fill(self):
-        """Fill tool: the triangles of a part reached from the clicked one without crossing an edge sharper than
-        the fill angle. Body: {id, tri, angle}. Returns {id, faces: [triangle indices]}."""
-        from . import pattern
+        """Fill tool: the triangles picked by a click (Plate.pick). Body: {id, tri, angle, spread}. Returns
+        {id, faces: [triangle indices]}."""
         b = self.json_body()
         with STATE.lock:
-            p = STATE.plate.find(int(b['id']))
-            tris = p['placed']
-            key = (p['id'], id(p['raw']))
-        seed = int(b['tri'])
-        if not 0 <= seed < len(tris):
-            return self.fail('No such triangle')
-        faces = pattern.fill_region(tris, seed, float(b.get('angle', 30)), cache_key=key)
-        return self.send_json({'id': p['id'], 'faces': faces.tolist()})
+            faces = STATE.plate.pick(int(b['id']), int(b['tri']), float(b.get('angle', 30)), bool(b.get('spread')))
+        return self.send_json({'id': int(b['id']), 'faces': faces.tolist()})
 
     def post_object_action(self, action):
         b = self.json_body()
@@ -596,8 +601,9 @@ class Handler(BaseHTTPRequestHandler):
         with STATE.lock:
             STATE.plate.clear(forget=True)
             ids = {}
-            for (name, raw, transform), old in zip(p['parts'], p.get('ids') or [None] * len(p['parts'])):
-                part = STATE.plate.add(name, raw, s, transform)
+            cads = p.get('cad_faces') or [None] * len(p['parts'])
+            for (name, raw, transform), old, cad in zip(p['parts'], p.get('ids') or [None] * len(p['parts']), cads):
+                part = STATE.plate.add(name, raw, s, transform, cad)
                 if old is not None:
                     ids[int(old)] = part['id']
             from . import pattern     # the parts get new ids: the picked surfaces (of every layer) follow them
@@ -730,6 +736,23 @@ def open_app_window(url):
     webbrowser.open(url)
 
 
+# When the window closes the page says so (/api/closing). A reload says the same, but then the next request follows.
+WINDOW = {'closing': None}
+CLOSE_WAIT = 5.0     # seconds
+
+
+def stop_when_window_closes(httpd):
+    """For the .exe, so that it does not stay behind in the background when its window is closed."""
+    while True:
+        time.sleep(0.5)
+        t = WINDOW['closing']
+        if t is not None and time.monotonic() - t > CLOSE_WAIT:
+            if WINDOW.get('request', 0.0) <= t:
+                httpd.shutdown()
+                return
+            WINDOW['closing'] = None
+
+
 class AppServer(ThreadingHTTPServer):
     # Never share the port: on Windows, address reuse lets a second server bind next to an old one that keeps answering
     allow_reuse_address = False
@@ -766,7 +789,12 @@ def main():
     ap.add_argument('--port', type=int, default=8765)
     ap.add_argument('--open', action='store_true', help='open the GUI window')
     ap.add_argument('--ui', choices=['new', 'classic'], default='new', help='which interface the window opens')
+    ap.add_argument('--stop-with-window', action='store_true', help='stop when the window is closed')
     args = ap.parse_args()
+    if settings.FROZEN:
+        args.open = args.stop_with_window = True
+        os.makedirs(settings.DATA_DIR, exist_ok=True)     # no console: messages go to a log
+        sys.stdout = sys.stderr = open(os.path.join(settings.DATA_DIR, 'yora.log'), 'w', encoding='utf-8', buffering=1)
     note = take_over_port(args.port)
     if note:
         print(note)
@@ -779,6 +807,8 @@ def main():
     print('YoRA Slicer %s running at %s  (Ctrl+C to stop)' % (__version__, url))
     if args.open:
         threading.Timer(0.5, open_app_window, args=(url + ('classic/' if args.ui == 'classic' else ''),)).start()
+    if args.stop_with_window:
+        threading.Thread(target=stop_when_window_closes, args=(httpd,), daemon=True).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
