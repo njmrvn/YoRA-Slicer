@@ -68,6 +68,21 @@ Each layer can be hidden, duplicated or deleted, and keeps its own waves per lap
 
 <img src="docs/surface-layers.png" width="640" alt="A bracket with a sine pattern on every wall and a deep zigzag on its front face">
 
+## Tool angles A, B, C
+
+After **Check robot path**, the Check tab shows the tool angles at the point on screen. **A** turns the nozzle around the vertical axis, **B** tilts it (90 points straight down with KUKA's tool X out of the nozzle) and **C** rolls it. These are not joints: the robot works out A1 to A6 from them.
+
+YoRA holds A steady and only changes it when a joint would pass its limit. To choose the angles yourself, tick **Set A, B, C by hand**. The robot moves as you drag, the whole path is checked again when you let go, and the program gets exactly what you typed.
+
+The values hold for the whole print, so A can no longer change to get out of a joint limit, and they replace the nozzle tilt of angled layers. A B other than 90 tilts the nozzle and the bead, and the check does not tell you if the nozzle would rub the walls, so try it on a small print first.
+
+## KUKA corner blending
+
+In the KUKA post-processor, **Blending type** chooses how the robot rounds each point:
+
+- `c_dis`: starts a set distance from the point, the **Corner blending** setting in mm. 0 is an exact stop at every point.
+- `c_vel`: starts when the speed drops to the **C_VEL speed** percent. It ignores Corner blending.
+
 ## Getting started
 
 Needs Windows and Python 3.10 or newer.

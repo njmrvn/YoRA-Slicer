@@ -10,7 +10,7 @@ import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 const ERR = { 1: 'unreachable', 2: 'joint limit', 4: 'wrist singularity', 8: 'configuration change', 32: 'collision with bed', 64: 'collision with part' };
 const POSE_LABELS = ['X', 'Y', 'Z', 'Rx', 'Ry', 'Rz'];
 const ROBOT_KEYS = new Set(['robot_model', 'tcp', 'tool_model', 'tool_model_pose', 'tool_model_scale', 'bed_frame', 'tool_rz', 'rotz_range', 'rotz_step', 'sing_margin', 'lock_config',
-  'start_joints', 'joint_jump_max', 'check_step', 'floor_margin']);
+  'start_joints', 'joint_jump_max', 'check_step', 'floor_margin', 'tool_abc_on', 'tool_a', 'tool_b', 'tool_c']);
 // simulation speed ratios
 const SPEEDS = [[1, '1× real time'], [5, '5× (normal)'], [20, '20×'], [100, '100× (fast)'], [500, '500×']];
 
@@ -245,6 +245,7 @@ export function initRobot(ctx) {
     linkMats.forEach((mats, i) => mats.forEach((m) => m.emissive.copy(hit && i >= 2 ? hitColor : noHit)));
     toolModelMat.emissive.copy(hit ? hitColor : noHit);
     updateJogReadout(q, F, live);
+    updateAbcNow(q, F);
   }
 
   // Same tests as robotpath.Solver.problems / collision, for instant feedback while jogging
@@ -438,6 +439,91 @@ export function initRobot(ctx) {
     $('rbToolSel').addEventListener('change', (e) => { setValue('tool_model', e.target.value); $('rbToolPlace').hidden = !e.target.value; });
     $('rbToolFile').addEventListener('change', (e) => { if (e.target.files[0]) uploadTool(e.target.files[0]); e.target.value = ''; });
     $('rbToolTip').addEventListener('click', setTcpAtTip);
+    buildAbc();
+  }
+
+  // ---------------- A, B, C by hand (Check pane) ----------------
+  const ABC = [['tool_a', 'A', -180, 180], ['tool_b', 'B', -90, 90], ['tool_c', 'C', -180, 180]];
+  // The tool angles the program would have for joints q: KUKA's A, B, C, as yora/post.py and posts/kuka_krl.py write them
+  function abcOf(q, F = R.kin.frames(q)) {
+    const { bedInv, tcp } = cell();
+    const T = bedInv.clone().multiply(F[6]).multiply(tcp);
+    if (R.result?.summary?.tool_axis === 'x') T.multiply(new THREE.Matrix4().makeRotationY(-Math.PI / 2));
+    const e = T.elements, m = (r, c) => e[c * 4 + r], deg = (v) => v / D2R;
+    if (Math.abs(m(2, 0)) > 1 - 1e-5) return [deg(Math.atan2(m(1, 2) * -Math.sign(m(2, 0)), m(1, 1))), m(2, 0) < 0 ? 90 : -90, 0];
+    return [deg(Math.atan2(m(1, 0), m(0, 0))), deg(Math.atan2(-m(2, 0), Math.hypot(m(0, 0), m(1, 0)))), deg(Math.atan2(m(2, 1), m(2, 2)))];
+  }
+  function updateAbcNow(q, F) {
+    const now = $('rbAbcNow');
+    if (!now || !R.result || app.values.tool_abc_on) return;
+    const v = abcOf(q, F);
+    R.abcNow = v;
+    now.textContent = `At this point: A ${fmt(v[0], 1)} · B ${fmt(v[1], 1)} · C ${fmt(v[2], 1)}`;
+  }
+  function buildAbc() {
+    const box = $('rbAbc');
+    if (!box) return;
+    if (!R.result) { box.innerHTML = ''; return; }
+    const on = !!app.values.tool_abc_on;
+    box.innerHTML = `<div class="abc-head"><label class="chk"><input type="checkbox" id="rbAbcOn"${on ? ' checked' : ''}> Set A, B, C by hand</label>
+      <span class="muted small" id="rbAbcNow"></span></div><div id="rbAbcRows"></div>
+      <div class="muted small">For the whole print, written to the program as they are. The robot shows them at this point, then the whole path is checked again.</div>
+      <div class="small" id="rbAbcStatus"></div>`;
+    $('rbAbcOn').addEventListener('change', (e) => toggleAbc(e.target.checked));
+    if (!on) { if (R.q) updateAbcNow(R.q); return; }
+    ABC.forEach(([key, lab, lo, hi]) => {
+      const row = document.createElement('div');
+      row.className = 'jog-row';
+      row.innerHTML = `<span>${lab}</span><input type="range" min="${lo}" max="${hi}" step="1" aria-label="${lab}"><input type="number" min="${lo}" max="${hi}" step="any" aria-label="${lab} degrees">`;
+      const [rng, num] = row.querySelectorAll('input');
+      rng.value = num.value = app.values[key];
+      rng.dataset.key = key;
+      const clamp = (v) => Math.max(lo, Math.min(hi, Number(v) || 0));
+      rng.addEventListener('input', () => { num.value = rng.value; previewAbc(); });
+      rng.addEventListener('change', () => commitAbc(key, clamp(rng.value)));
+      num.addEventListener('input', () => { if (num.value !== '' && Number.isFinite(Number(num.value))) { rng.value = clamp(num.value); previewAbc(); } });
+      num.addEventListener('change', () => { num.value = clamp(num.value); rng.value = num.value; commitAbc(key, Number(num.value)); });
+      $('rbAbcRows').appendChild(row);
+    });
+  }
+  function abcInputs() { return ABC.map(([key]) => Number($('rbAbcRows').querySelector(`input[data-key="${key}"]`).parentElement.querySelector('input[type=number]').value) || 0); }
+  function toggleAbc(on) {
+    if (on) {     // start from the angles at the point on screen
+      const v = R.q ? abcOf(R.q) : [0, 90, 0];
+      ABC.forEach(([key], i) => { app.values[key] = +v[i].toFixed(2); });
+    }
+    setValue('tool_abc_on', on);
+    buildAbc();
+    recheck();
+  }
+  // Only the latest values are sent, so dragging a slider does not queue up requests
+  async function previewAbc() {
+    stopPlay();
+    R.abcWant = abcInputs();
+    if (R.abcBusy) return;
+    R.abcBusy = true;
+    try {
+      while (R.abcWant) {
+        const abc = R.abcWant;
+        R.abcWant = null;
+        const res = await (await postJSON('/api/robot/abc', { settings: app.values, joints: R.q || startJoints(), move: R.move || 0, abc })).json();
+        if (res.ok) setPose(res.joints);
+        const st = $('rbAbcStatus');
+        if (st) st.innerHTML = res.problems.length ? `<span class="bad">At this point: ${res.problems.join(' · ')}</span>` : '<span class="muted">At this point: OK</span>';
+      }
+    } catch (e) { toast(e.message, 'error'); } finally { R.abcBusy = false; }
+  }
+  function commitAbc(key, v) {
+    setValue(key, v);
+    previewAbc();
+    recheck();
+  }
+  // Check the whole path again with the new angles, keeping the robot at the same time in the simulation
+  function recheck() {
+    if (!R.result) return;
+    if (R.checking) { R.checkAgain = true; return; }
+    R.keepTime = true;
+    check();
   }
 
   // ---------------- robot cells ----------------
@@ -761,12 +847,13 @@ Bed frame X, Y, Z: ${f(old)}  →  ${f(neu)} mm
     if (key === 'bed_frame' || key === 'tcp' || key === 'robot_model') { if ($('rbReach')?.checked) toggleReach(); }
   }
   app.hooks.push((f) => onRobotSetting(f.key));
-  app.onToolpathChanged = () => { R.sim = null; R.result = null; stopPlay(); markStale(); renderResult(); };
+  app.onToolpathChanged = () => { R.sim = null; R.result = null; stopPlay(); markStale(); renderResult(); buildAbc(); };
 
   async function check() {
     if (!app.result) return toast('Slice a model or import G-code first.', 'warn');
     if (!R.model) return toast('Pick or load a robot model first.', 'warn');
     $('rbCheck').disabled = true;
+    R.checking = true;
     try {
       await postJSON('/api/robot/check', { settings: app.values });
       for (;;) {
@@ -776,22 +863,31 @@ Bed frame X, Y, Z: ${f(old)}  →  ${f(neu)} mm
         if (st.state === 'error') throw new Error(st.error);
         if (st.state === 'done') { await showResult(st.result); break; }
       }
-    } catch (e) { $('rbStatus').innerHTML = ''; toast('Robot check failed: ' + e.message, 'error', 10000); } finally { $('rbCheck').disabled = false; }
+    } catch (e) { $('rbStatus').innerHTML = ''; toast('Robot check failed: ' + e.message, 'error', 10000); } finally {
+      $('rbCheck').disabled = false;
+      R.checking = false;
+      if (R.checkAgain) { R.checkAgain = false; recheck(); }
+    }
   }
   async function showResult(res) {
+    const first = !R.result;
     R.result = res; R.stale = false;
+    const t = R.keepTime ? R.t || 0 : 0;
+    R.keepTime = false;
     const buf = await (await api('/api/robot/sim.bin')).arrayBuffer();
     R.sim = new Float32Array(buf);
     R.simN = R.sim.length / 9;
     R.simT = R.simN ? R.sim[(R.simN - 1) * 9] : 0;
     $('rbPlay').max = R.simT;
     $('rbPlay').step = Math.max(R.simT / 5000, 0.01);
-    $('rbPlay').value = 0;
+    $('rbPlay').value = t;
     $('playBar').hidden = false;
-    showTime(0);
+    showTime(t);
     drawErrors(res.error_points);
     renderResult();
     renderLimits();
+    if (first || !$('rbAbc')?.childElementCount) buildAbc();
+    else if (R.q) updateAbcNow(R.q);
   }
   function drawErrors(points) {
     errGroup.clear();
@@ -819,7 +915,7 @@ Bed frame X, Y, Z: ${f(old)}  →  ${f(neu)} mm
       ['Start joints', sm.start_joints.map((v) => fmt(v, 1)).join(', ')],
       ['Closest to wrist singularity', `|J5| = ${fmt(sm.j5_min_abs, 1)}°`],
       ['J6 travel (wind-up)', `${fmt(sm.j6_travel, 1)}°`],
-      ['Tool rotation used', sm.rz_min === sm.rz_max ? `${fmt(sm.rz_min, 0)}° (constant)` : `${fmt(sm.rz_min, 0)}…${fmt(sm.rz_max, 0)}° · ${sm.rz_changes} changes`],
+      ['Tool rotation used', sm.fixed_abc ? `A ${fmt(sm.fixed_abc[0], 1)} · B ${fmt(sm.fixed_abc[1], 1)} · C ${fmt(sm.fixed_abc[2], 1)} (set by hand)` : sm.rz_min === sm.rz_max ? `${fmt(sm.rz_min, 0)}° (constant)` : `${fmt(sm.rz_min, 0)}…${fmt(sm.rz_max, 0)}° · ${sm.rz_changes} changes`],
       ['Smallest limit margin', sm.limit_margin_min.map((v, j) => `J${j + 1} ${fmt(v, 0)}°`).join(' · ')],
       ['Collision check', R.model?.has_mesh ? 'robot 3D links vs bed and printed part' : 'joint positions vs bed plane (load the .robot file for a 3D check)'],
       ['Cycle time (path)', ctx.fmtTime(sm.time_s)],
@@ -888,6 +984,7 @@ Bed frame X, Y, Z: ${f(old)}  →  ${f(neu)} mm
     const bits = R.sim[k * 9 + 7] | 0;
     setPose(q, bits);
     const move = R.sim[k * 9 + 8] | 0;
+    R.move = move;
     const tr = R.result.trace;
     let li = 0;
     for (let i = 0; i < tr.move.length && tr.move[i] <= move; i++) li = i;

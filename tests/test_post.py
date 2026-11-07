@@ -144,6 +144,75 @@ class KukaTest(unittest.TestCase):
         expect = K.rotx(math.pi) @ K.rotz(math.radians(30)) @ K.roty(-math.pi / 2)    # tool X out of the nozzle
         np.testing.assert_allclose(R, expect[:3, :3], atol=1e-6)
 
+    def test_abc_by_hand_written_as_typed(self):
+        tp, s = job(tool_abc_on=True, tool_a=-100, tool_b=90, tool_c=30)
+        src = self.export(tp, s)[0]['Krl_Test.src']
+        lins = [l for l in src.splitlines() if l.strip().startswith('LIN ')]
+        self.assertTrue(lins)
+        self.assertTrue(all('A -100.0000,B 90.0000,C 30.0000}' in l for l in lins), lins[0])
+
+    def test_abc_by_hand_same_pose_as_solver(self):
+        # the solver's pose and the program's pose must agree, for any tool angles and either tool frame
+        for axis in ('x', 'z'):
+            tp, s = job(tool_abc_on=True, tool_a=-130, tool_b=75, tool_c=20)
+            F = RP.fixed_tool(s, axis)
+            R = K.rotz(math.radians(-130)) @ K.roty(math.radians(75)) @ K.rotx(math.radians(20))
+            to_tool = K.roty(-math.pi / 2) if axis == 'x' else np.eye(4)
+            np.testing.assert_allclose(F @ to_tool, R, atol=1e-9)
+
+    def test_abc_matches_solved_rotation(self):
+        # A -80, B 90, C 0 with tool X out of the nozzle is the solved "nozzle down, rz -100" of the earlier program
+        tp, s = job(tool_abc_on=True, tool_a=-80, tool_b=90, tool_c=0)
+        np.testing.assert_allclose(RP.fixed_tool(s, 'x'), K.rotx(math.pi) @ K.rotz(math.radians(-100)), atol=1e-9)
+
+    def test_abc_off_changes_nothing(self):
+        tp, s = job()
+        self.assertIsNone(RP.fixed_tool(s, 'x'))
+
+    @unittest.skipUnless(MODEL in K.list_robots(), 'robot model not imported yet')
+    def test_abc_by_hand_solver_holds_it(self):
+        tp, s = job()
+        robot = K.load_robot(MODEL)
+        free = RP.solve_robot_path(tp, s, robot)
+        tp, s = job(tool_abc_on=True, tool_a=0, tool_b=0, tool_c=180, post_name='Borunte .act')
+        rp = RP.solve_robot_path(tp, s, robot)
+        self.assertEqual(rp.summary['fixed_abc'], [0, 0, 180])
+        self.assertEqual(rp.summary['rz_changes'], 0)
+        bed, tcp = RP.cell_frames(s)
+        for i in (0, len(tp) // 2, len(tp) - 1):            # the robot really holds those angles
+            T = np.linalg.inv(bed) @ robot.fk(rp.joints[i]) @ tcp
+            np.testing.assert_allclose(T[:3, :3], (K.rotz(0) @ K.roty(0) @ K.rotx(math.pi))[:3, :3], atol=1e-4)
+        self.assertEqual(len(free.joints), len(rp.joints))
+
+    def test_blending_type(self):
+        def run(blending, **options):
+            tp, s = job(blending=blending)
+            d = with_events('KUKA KRL (KR C4)')
+            d['options'].update(options)
+            path, _ = post.export_program(tp, s, tempfile.mkdtemp(), 'Krl Test', None, d)
+            body = [l.strip() for l in files(path)['Krl_Test.src'].splitlines()]
+            lins = [l for l in body if l.startswith('LIN ')]
+            self.assertTrue(lins)
+            return body, lins
+
+        body, lins = run(2)                                 # the default stays C_DIS with the distance in mm
+        self.assertIn('$APO.CDIS=2.00', body)
+        self.assertTrue(all(l.endswith('} C_DIS') for l in lins))
+        self.assertFalse([l for l in body if 'CVEL' in l])
+
+        body, lins = run(2, blend_type='c_vel', cvel_pct=75)
+        self.assertIn('$APO.CVEL=75', body)
+        self.assertTrue(all(l.endswith('} C_VEL') for l in lins))
+        self.assertFalse([l for l in body if 'CDIS' in l or 'C_DIS' in l])
+
+        body, lins = run(0, blend_type='c_vel')             # Corner blending does not switch C_VEL off
+        self.assertIn('$APO.CVEL=100', body)
+        self.assertTrue(all(l.endswith('} C_VEL') for l in lins))
+
+        body, lins = run(0)                                 # C_DIS at 0 is an exact stop
+        self.assertTrue(all(l.endswith('}') for l in lins))
+        self.assertFalse([l for l in body if '$APO' in l])
+
     def test_tool_direction_same_flange(self):
         # tool X or tool Z out of the nozzle: with the matching tool frame the flange ends up in the same place
         tp, s = job(tcp='374.2,17.467,30.652,90,90,0')

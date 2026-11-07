@@ -73,6 +73,8 @@ def export_act(tp, s, out_dir, name, robot_path=None):
         joints = parse_float_list(s['start_joints']) if s['start_joints'].strip() else None
         rz_of = lambda i: float(s['tool_rz'])
     down = rotx(math.pi)
+    from . import robotpath
+    fixed = robotpath.fixed_tool(s, 'z')
 
     r.ProgStart(name)
     r.setFrame(eye(), int(s['user_frame_id']), 'Bed')
@@ -92,7 +94,7 @@ def export_act(tp, s, out_dir, name, robot_path=None):
         if f != last_f:
             r.setSpeed(f)
             last_f = f
-        r.MoveL(transl(x, y, z) @ tool_rotation(tp, i) @ down @ rotz(math.radians(rz_of(i))), None, None)
+        r.MoveL(transl(x, y, z) @ (fixed if fixed is not None else tool_rotation(tp, i) @ down @ rotz(math.radians(rz_of(i)))), None, None)
         prev = here
     if joints and robot_path is None:
         r.MoveJ(None, joints, None)

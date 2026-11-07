@@ -243,7 +243,7 @@ SPEC = [
     ('Robot & bed', 'tool_id', 'Controller tool #', 'int', 1, {'min': 0, 'max': 99, 'help': 'Borunte tool with the TCP at the nozzle tip.'}),
     ('Robot & bed', 'safe_z', 'Approach / retreat height', 'float', 50, {'unit': 'mm', 'min': 0, 'max': 2000}),
     ('Robot & bed', 'blending', 'Corner blending (smooth)', 'int', 0, {'min': 0, 'max': 100,
-                                                                     'help': 'Written to the Borunte smooth field. Verify its effect on your controller.'}),
+                                                                     'help': 'Borunte: the smooth field, verify its effect on your controller. KUKA: $APO.CDIS in mm, 0 = exact stop.'}),
     ('Robot & bed', 'def_spd_mms', 'Controller 100% speed', 'float', 1000, {'unit': 'mm/s', 'min': 10, 'max': 10000,
                                                                           'help': 'Borunte speeds are written as % of this value.'}),
 
@@ -272,6 +272,11 @@ SPEC = [
     ('Robot cell', 'rotz_range', 'Free rotation about tool Z', 'float', 180, {'unit': '± deg', 'min': 0, 'max': 180,
                                                                               'help': 'The nozzle is round, so the robot may turn it about Z to avoid limits and singularities.'}),
     ('Robot cell', 'rotz_step', 'Rotation search step', 'float', 10, {'unit': 'deg', 'min': 1, 'max': 90}),
+    ('Robot cell', 'tool_abc_on', 'Set A, B, C by hand', 'bool', False, {
+        'help': 'Hold these tool angles for the whole print, written to the program as they are, instead of the solved rotation.'}),
+    ('Robot cell', 'tool_a', 'A (about Z)', 'float', 0, {'unit': 'deg', 'min': -180, 'max': 180}),
+    ('Robot cell', 'tool_b', 'B (about Y)', 'float', 90, {'unit': 'deg', 'min': -90, 'max': 90}),
+    ('Robot cell', 'tool_c', 'C (about X)', 'float', 0, {'unit': 'deg', 'min': -180, 'max': 180}),
     ('Robot cell', 'sing_margin', 'Wrist singularity margin |J5| ≥', 'float', 8, {'unit': 'deg', 'min': 0, 'max': 60}),
     ('Robot cell', 'lock_config', 'Lock robot configuration', 'bool', True,
      {'help': 'Keep front/rear, elbow and wrist the same for the whole print (no arm flips mid-print).'}),

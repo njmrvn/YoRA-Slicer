@@ -53,6 +53,25 @@ def tcp_pose_bed(x, y, z, rz_deg, tilt=None):
     return T @ K.rotx(math.pi) @ K.rotz(math.radians(rz_deg))
 
 
+def tool_axis_of(s):
+    """The tool axis out of the nozzle for the post-processor in use: 'x' for KUKA's standard, else 'z' (the slicer TCP)."""
+    from . import post
+    try:
+        d = post.load_post(s.get('post_name') or 'Borunte .act')
+    except Exception:
+        return 'z'
+    return d['options'].get('tool_axis', 'x') if d.get('language') == 'kuka_krl' else 'z'
+
+
+def fixed_tool(s, axis=None):
+    """The nozzle rotation in the bed frame (slicer TCP frame, 4x4) for A, B, C set by hand, or None for the solved one.
+    A, B, C are KUKA's: Rz(A) Ry(B) Rx(C) of the program's tool frame."""
+    if not s.get('tool_abc_on'):
+        return None
+    T = K.rotz(math.radians(s['tool_a'])) @ K.roty(math.radians(s['tool_b'])) @ K.rotx(math.radians(s['tool_c']))
+    return T @ K.roty(math.pi / 2) if (axis or tool_axis_of(s)) == 'x' else T
+
+
 class Solver:
     def __init__(self, robot, s):
         self.robot, self.s = robot, s
@@ -67,6 +86,9 @@ class Solver:
             k += 1
         self.offsets = offs
         self.rz0 = s['tool_rz']
+        self.fixed = fixed_tool(s)    # A, B, C set by hand: no rotation search, and no tilt with angled layers
+        if self.fixed is not None:
+            self.offsets = [0.0]
         self.part_box = None      # (xmin, ymin, xmax, ymax) of the flat layers, set by solve_robot_path
         self.part_box_a = None    # ... of the angled layers, in the slice frame (part_R, part_z0)
         self.part_R, self.part_z0 = np.eye(3), 0.0
@@ -76,6 +98,8 @@ class Solver:
         self.tool_pts = tool.hull_flange(s)   # tool head model surface points in the flange frame (None = no model)
 
     def flange(self, x, y, z, rz, o=0):
+        if self.fixed is not None:
+            return self.bed @ K.transl(x, y, z) @ self.fixed @ self.inv_tcp
         return self.bed @ tcp_pose_bed(x, y, z, rz, self.tilts[o] if o else None) @ self.inv_tcp
 
     def part_hit(self, p, printed, margin=0.0):
@@ -195,7 +219,8 @@ def _batch_moves(sv, tp, i0, i1, q_prev, rz, lock, step, printed_z_of):
     N = len(P)
     # flange poses: bed @ transl(p) @ tilt @ rotx(pi) @ rotz(rz) @ inv(tcp); one rotation per nozzle orientation
     o = sv.orient[owner] if sv.orient is not None else np.zeros(N, dtype=int)
-    Ms = np.stack([sv.tilts[k] @ K.rotx(math.pi) @ K.rotz(math.radians(rz)) @ sv.inv_tcp for k in (0, 1)])[o]
+    Ms = np.stack([(sv.tilts[k] @ K.rotx(math.pi) @ K.rotz(math.radians(rz)) if sv.fixed is None else sv.fixed) @ sv.inv_tcp
+                   for k in (0, 1)])[o]
     bed = sv.bed
     T = np.zeros((N, 4, 4))
     T[:, :3, :3] = bed[:3, :3] @ Ms[:, :3, :3]
@@ -396,6 +421,8 @@ def summarize(rp, tp, s, robot, sv):
         'j6_travel': float(used_hi[5] - used_lo[5]),
         'rz_min': float(rp.rz.min()) if n else 0.0, 'rz_max': float(rp.rz.max()) if n else 0.0,
         'rz_changes': int(np.count_nonzero(np.abs(np.diff(rp.rz)) > 1e-9)),
+        'tool_axis': tool_axis_of(s),
+        'fixed_abc': [s['tool_a'], s['tool_b'], s['tool_c']] if s.get('tool_abc_on') else None,
         'start_joints': rp.joints[0].round(3).tolist() if n else [],
         'time_s': float(tp.stats.get('time_s', 0.0)),
         'issues_total': int(np.count_nonzero(bad)),

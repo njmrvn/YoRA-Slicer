@@ -81,11 +81,13 @@ class State:
 STATE = State()
 
 ROBOT_KEYS = ('robot_model', 'tcp', 'tool_model', 'tool_model_pose', 'tool_model_scale', 'bed_frame', 'tool_rz', 'rotz_range', 'rotz_step', 'sing_margin', 'lock_config',
-              'start_joints', 'joint_jump_max', 'check_step', 'floor_margin')
+              'start_joints', 'joint_jump_max', 'check_step', 'floor_margin', 'tool_abc_on', 'tool_a', 'tool_b', 'tool_c')
 
 
 def robot_key(s):
-    return (id(STATE.toolpath), tuple(str(s[k]) for k in ROBOT_KEYS))
+    from . import robotpath
+    axis = robotpath.tool_axis_of(s) if s['tool_abc_on'] else None      # what A, B, C mean depends on the post's tool frame
+    return (id(STATE.toolpath), tuple(str(s[k]) for k in ROBOT_KEYS), axis)
 
 
 def current_robot_path(s):
@@ -512,6 +514,22 @@ class Handler(BaseHTTPRequestHandler):
             sv = robotpath.Solver(model, s)
             bits = sv.problems(q) | sv.collision(q)
             return self.send_json({'ok': True, 'joints': q.round(4).tolist(), 'tcp': [round(v, 3) for v in robotpath.tcp_bed(model, s, q)],
+                                   'problems': [nm for bit, nm in robotpath.ERR_NAMES.items() if bits & bit]})
+        if action == 'abc':
+            # A, B, C being edited: the robot at one point of the print with those angles, for the live view
+            tp = STATE.toolpath
+            if tp is None or not len(tp):
+                return self.fail('Slice a model or import G-code first')
+            model = kinematics.load_robot(s['robot_model'])
+            a, b_, c = (float(v) for v in b['abc'])
+            sv = robotpath.Solver(model, dict(s, tool_abc_on=True, tool_a=a, tool_b=b_, tool_c=c))
+            i = max(0, min(int(b.get('move', 0)), len(tp) - 1))
+            q0 = np.array(b['joints'], dtype=float)
+            q = model.ik_near(sv.flange(float(tp.x[i]), float(tp.y[i]), float(tp.z[i]), 0.0), q0, model.config_of(q0))
+            if q is None:
+                return self.send_json({'ok': False, 'problems': ['unreachable']})
+            bits = sv.problems(q) | sv.collision(q)
+            return self.send_json({'ok': True, 'joints': q.round(4).tolist(),
                                    'problems': [nm for bit, nm in robotpath.ERR_NAMES.items() if bits & bit]})
         if action == 'corners':
             # Setup: can the nozzle reach the bed corners, at the bed and at the full print height?

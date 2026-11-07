@@ -71,6 +71,11 @@ LANGUAGES = {
             ('output_mode', 'Output switching', 'choice', 'trigger', {'options': ['trigger', 'out_c', 'direct'],
              'help': 'trigger: TRIGGER WHEN DISTANCE=0 DO $OUT[n], switched exactly at the start of the next move '
                      '(recommended). out_c: $OUT_C[n]. direct: $OUT[n] (switches early, in the advance run).'}),
+            ('blend_type', 'Blending type', 'choice', 'c_dis', {'options': ['c_dis', 'c_vel'],
+             'help': 'c_dis: starts a set distance from each point, the Corner blending setting in mm (0 = exact stop). '
+                     'c_vel: starts when the speed drops to the C_VEL speed below, and ignores Corner blending.'}),
+            ('cvel_pct', 'C_VEL speed', 'int', 100, {'unit': '%', 'min': 1, 'max': 100,
+             'help': '$APO.CVEL, used with c_vel: blending starts when the speed has dropped to this % of the programmed speed.'}),
             ('ptp_speed_pct', 'PTP speed', 'float', 20.0, {'unit': '%', 'min': 1, 'max': 100}),
             ('advance', '$ADVANCE', 'int', 3, {'min': 1, 'max': 5, 'help': 'Motion blocks planned ahead; needed for corner blending.'}),
             ('max_moves_per_file', 'Split into files of', 'int', 0, {'unit': 'moves', 'min': 0, 'max': 10000000,
@@ -271,7 +276,7 @@ def _robot_post_class(language):
 
 
 def _export_robot(tp, s, out_dir, name, robot_path, d):
-    from . import robot
+    from . import robot, robotpath
     cls = _robot_post_class(d['language'])           # also puts posts/ on sys.path
     from borunte_act import eye, rotx, roty, rotz, transl   # numpy poses
     name = robot.safe_name(name)
@@ -284,6 +289,7 @@ def _export_robot(tp, s, out_dir, name, robot_path, d):
     if d['language'] == 'kuka_krl':
         r.OUTPUT_MODE, r.PTP_SPEED_PCT = o['output_mode'], o['ptp_speed_pct']
         r.ADVANCE, r.MAX_MOVES_PER_FILE = o['advance'], o['max_moves_per_file']
+        r.BLEND_TYPE, r.CVEL_PCT = o['blend_type'], o['cvel_pct']
 
     ctx = _context(tp, s, name, d['name'])
     parsed = {k: parse_event(d['events'][k]) for k in EVENT_KEYS}
@@ -316,6 +322,9 @@ def _export_robot(tp, s, out_dir, name, robot_path, d):
     down = rotx(math.pi)
     # KUKA standard: tool X out of the nozzle. Same physical pose, the tool frame turned after the nozzle's Z turn
     to_tool = roty(-math.pi / 2) if d['language'] == 'kuka_krl' and o.get('tool_axis', 'x') == 'x' else eye()
+    fixed = robotpath.fixed_tool(s, 'x' if d['language'] == 'kuka_krl' and o.get('tool_axis', 'x') == 'x' else 'z')
+    if fixed is not None and d['language'] == 'kuka_krl':
+        r.FIXED_ABC = (s['tool_a'], s['tool_b'], s['tool_c'])
 
     r.ProgStart(name)
     r.setFrame(eye(), int(s['user_frame_id']), 'Bed')
@@ -350,7 +359,8 @@ def _export_robot(tp, s, out_dir, name, robot_path, d):
         if f != last_f:
             r.setSpeed(f)
             last_f = f
-        r.MoveL(transl(x, y, z) @ tool_rotation(tp, i) @ down @ rotz(math.radians(rz_of(i))) @ to_tool, None, None)
+        turn = fixed if fixed is not None else tool_rotation(tp, i) @ down @ rotz(math.radians(rz_of(i)))
+        r.MoveL(transl(x, y, z) @ turn @ to_tool, None, None)
         prev = here
     if cur_layer is not None:
         run('layer_end')

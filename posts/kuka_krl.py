@@ -10,7 +10,9 @@
 #       LIN {X x, Y y, Z z, A a, B b, C c}   A, B, C = rotation about Z, Y, X (KUKA convention: Rz(A) Ry(B) Rx(C))
 #   - Joint moves: PTP {A1 .., A2 .., A3 .., A4 .., A5 .., A6 ..} (joint values as in the robot model).
 #   - Speed: $VEL.CP in m/s for LIN/CIRC, BAS(#VEL_PTP, %) for PTP.
-#   - Corner blending: $APO.CDIS (mm) and C_DIS on the moves (0 = exact stop at every point).
+#   - Corner blending, one of:
+#       C_DIS: $APO.CDIS (mm) and C_DIS on the moves (0 = exact stop at every point).
+#       C_VEL: $APO.CVEL (% of the programmed speed) and C_VEL on the moves.
 #   - Digital outputs are switched in sync with the motion (TRIGGER WHEN DISTANCE=0 ... DO $OUT[n]), so the
 #     controller's advance run doesn't switch them early. Before a WAIT or at the end of the program they are
 #     set directly after "WAIT SEC 0" (stops the advance run), which is the KRL idiom for that.
@@ -46,6 +48,9 @@ class KukaKrlPost:
     OUTPUT_MODE = 'trigger'     # 'trigger' (synchronised with motion), 'out_c' ($OUT_C at the next motion), 'direct'
     PTP_SPEED_PCT = 20.0        # % of the maximum joint speed for PTP moves
     ADVANCE = 3                 # $ADVANCE: motion blocks planned ahead (needed for blending)
+    BLEND_TYPE = 'c_dis'        # 'c_dis' (by distance, from the corner blending setting) or 'c_vel' (by speed)
+    FIXED_ABC = None            # (A, B, C) set by hand: written exactly as typed
+    CVEL_PCT = 100              # $APO.CVEL: blending starts when the speed has dropped to this % of the programmed speed
     MAX_MOVES_PER_FILE = 0      # >0: split into sub-programs called from the main program
     DECIMALS = 3
 
@@ -119,9 +124,13 @@ class KukaKrlPost:
     def _pos(self, pose):
         x, y, z, c, b, a = pose_to_xyzrpw_zyx(pose)       # r about X = C, p about Y = B, w about Z = A
         d = self.DECIMALS
+        if self.FIXED_ABC is not None:     # at B 90 only A - C decides the pose: the values from the pose could differ
+            a, b, c = self.FIXED_ABC
         return '{X %s,Y %s,Z %s,A %s,B %s,C %s}' % (_num(x, d), _num(y, d), _num(z, d), _num(a, 4), _num(b, 4), _num(c, 4))
 
     def _blend(self):
+        if self.BLEND_TYPE == 'c_vel':
+            return ' C_VEL'
         return ' C_DIS' if self._zone > 0 else ''
 
     def MoveJ(self, pose, joints, conf_RLF=None):
@@ -165,7 +174,9 @@ class KukaKrlPost:
 
     def setZoneData(self, zone_mm):
         self._zone = max(float(zone_mm), 0.0)
-        if self._zone > 0:
+        if self.BLEND_TYPE == 'c_vel':
+            self._line('$APO.CVEL=%i' % self.CVEL_PCT)
+        elif self._zone > 0:
             self._line('$APO.CDIS=%s' % _num(self._zone, 2))
 
     def setFrame(self, pose, frame_id=0, frame_name=''):

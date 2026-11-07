@@ -312,6 +312,10 @@ table.kv td { padding: 4px 0; font-size: 12px; }
 .jog-row input[type=range] { accent-color: var(--secondary); width: 100%; }
 .jog-row input[type=number] { height: 26px; padding: 0 6px; }
 .jog-row.bad span, .jog-row.bad input[type=number] { color: var(--error); }
+.abc-panel { display: grid; gap: 6px; margin: 8px 0; padding: 8px; background: var(--panel-2); border-radius: 6px; }
+.abc-panel:empty { display: none; }
+.abc-panel .abc-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.abc-panel .jog-row.off { opacity: .55; }
 .jog-tcp { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin: 4px 0; font-variant-numeric: tabular-nums; font-size: 12px; }
 .jog-tcp span { display: grid; background: var(--panel-2); border-radius: 6px; padding: 3px 5px; }
 .jog-tcp small { color: var(--muted); font-size: 10px; }
