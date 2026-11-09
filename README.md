@@ -29,10 +29,13 @@ Press **Save** (Ctrl+S) to keep everything as a `.yora` project, and **Ctrl+Z** 
 ## Features
 
 - Walls, infill, brim, raft and spiral vase
+- Walls inside the part or centred on its surface, printed clockwise, counter-clockwise or alternating
 - STEP, STL, OBJ and 3MF import
 - Several parts on the bed: add, duplicate and arrange them
 - Project files (`.yora`): the parts, every setting and the files they use, in one file
 - Angled layers for printing overhangs without supports
+- Curved layers: every layer square to a curve through the part, so bent parts print along their bend
+- Layer data: time, path length, height, material and peak flow of each layer, as a chart and as preview colours
 - Overhang view: colours steep walls and warns past the material's limit
 - Seam control: pick a point or draw a line on the part
 - Surface patterns: waves, spikes, bumps, noise or a picture on the outer wall, in up to four layers, on surfaces you paint or pick
@@ -67,6 +70,32 @@ Put up to four patterns on one part, for example a sine on the body and a pictur
 Each layer can be hidden, duplicated or deleted, and keeps its own waves per lap.
 
 <img src="docs/surface-layers.png" width="640" alt="A bracket with a sine pattern on every wall and a deep zigzag on its front face">
+
+## Curved layers
+
+Set **Layer strategy** to `curve` (Printing strategy) for a part that bends, like an arm or a bent tube. Every layer is then square to a curve through the middle of the part, so the part prints along its own bend instead of in flat layers that overhang, and the nozzle tilts with each layer.
+
+YoRA finds the curve from the part (its middle line) and draws it in Prepare, with some of the layer planes. To choose another curve, use the **Curve** card:
+
+- **Middle line**: the part's middle line, kept so you can drag its dots.
+- **Pick edge**: the edges you can pick are highlighted; click near one and the curve follows it until it turns a corner. On a STEP part the borders between its faces count as edges too.
+- **Draw line**: paint the curve on the part, bottom to top (Enter or Done finishes).
+- **Curve from another part**: choose a guide part, such as a bent rod modelled where the print goes, and press **Use**. The curve is its middle line, and YoRA offers to take the guide off the bed so it isn't printed (Undo brings it back). A part you add lands in a free spot on the bed, so set its Position first.
+- Drag any dot to bend the curve; it moves in the plane facing you. **Reset** goes back to the middle line found each time you slice. The points are also in **Curve points** (All settings).
+
+Layer heights are measured along the curve. Where it bends, a layer is thicker on the outside of the bend than on the inside (more so with a curve along an edge on the inside of the bend). **Thicker / thinner layers by** chooses how the material follows: `flow` keeps the speed and changes the extrusion, `speed` keeps the extruder steady and slows the robot down where a layer is thicker. In Preview, **Color by → Layer height** and the extrusions show each bead's own thickness, and the layer card shows its range. YoRA warns when the bend is so tight for the part's width that layers would cross. A **Horizontal base height** prints the bottom flat first.
+
+Seams: **Pick point** keeps the seam on that side of the part all the way along the bend; **Draw line** starts each layer where the line crosses it.
+
+Not on curved layers yet: spiral vase, raft, and the robot check for collisions with the printed part.
+
+## Wall placement and print direction
+
+**Wall placement** (Layers & walls): `inside` keeps the whole bead inside the part, so the part keeps its size; `centered` puts the middle of the bead on the surface, half in and half out. **Print direction**: `ccw` or `cw` seen from above (from the nozzle on angled and curved layers), or `alternate`, which changes every layer.
+
+## Layer data
+
+In Preview, the card next to the layer slider shows the top layer's height, time, path length, travel, material and peak flow, with a chart of one of them over all layers; click the chart to go to a layer. **Color by** can also colour the toolpath by flow rate, layer time, layer path length or layer height.
 
 ## Tool angles A, B, C
 

@@ -60,7 +60,7 @@ function rampColor(t, c = new THREE.Color()) {
 const KIND_LABELS = { 1: 'Outer wall', 2: 'Inner wall', 3: 'Sparse infill', 4: 'Solid infill', 5: 'Brim', 7: 'Raft' };
 const FLOATS = 13; // x0 y0 z0 x1 y1 z1 kind level layer speed e_per_mm layer_height move
 // Settings shown with "Essentials" (the rest is one click away under "All")
-const ESSENTIAL = new Set(['layer_height', 'first_layer_height', 'line_width', 'walls', 'top_layers', 'bottom_layers', 'spiral_vase',
+const ESSENTIAL = new Set(['layer_height', 'first_layer_height', 'line_width', 'walls', 'wall_placement', 'wall_direction', 'top_layers', 'bottom_layers', 'spiral_vase',
   'brim_loops', 'raft_type', 'raft_offset', 'raft_layers', 'raft_angle', 'seam', 'layer_change', 'ramp_length', 'point_mode', 'point_spacing', 'pattern', 'pattern_amplitude', 'pattern_wavelength', 'pattern_shift', 'print_strategy', 'slice_angle', 'slice_direction', 'base_height', 'infill_density', 'infill_pattern', 'outer_wall_speed', 'inner_wall_speed',
   'infill_speed', 'travel_speed', 'flow', 'nozzle_diameter', 'bed_x', 'bed_y', 'blending', 'extruder_enable_do', 'flow_level_dos',
   'start_delay']);
@@ -137,6 +137,7 @@ function initView() {
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
   initPlaneDrag();
   initSeamTools();
+  initCurveTools();
   initHelpTips();
   (function loop() { requestAnimationFrame(loop); view.controls.update(); view.renderer.render(view.scene, view.camera); })();
 }
@@ -200,6 +201,20 @@ function orthoFrustum() {
   Object.assign(view.ortho, { left: -h * a, right: h * a, top: h, bottom: -h });
   view.ortho.updateProjectionMatrix();
 }
+// The orthographic camera stays far back along its view direction: what it shows doesn't depend on the distance, and
+// nothing of the bed or the robot can end up behind it, where it would be cut off by a straight edge.
+function orthoDepth() {
+  const v = app.values || {};
+  return Math.max(5000, 4 * Math.max(Number(v.bed_x) || 1000, Number(v.bed_y) || 1000, Number(v.bed_z) || 1000));
+}
+function placeOrtho() {
+  const t = view.controls.target, dir = view.ortho.position.clone().sub(t);
+  if (dir.lengthSq() < 1e-12) dir.set(-0.6, -1, 0.75);
+  const D = orthoDepth();
+  view.ortho.position.copy(t).addScaledVector(dir.normalize(), D);
+  view.ortho.near = 1; view.ortho.far = D * 3;
+  view.ortho.updateProjectionMatrix();
+}
 function setView(kind) {
   const b = sceneBounds();
   const c = b.getCenter(new THREE.Vector3());
@@ -215,6 +230,7 @@ function setView(kind) {
   }
   view.ortho.zoom = 1;
   view.orthoHalf = size * 0.5;                         // about what the perspective camera shows at that distance
+  placeOrtho();
   orthoFrustum();
   view.persp.updateProjectionMatrix();
 }
@@ -226,7 +242,8 @@ function setProjection(ortho) {
     to.position.copy(from.position); to.quaternion.copy(from.quaternion);
     if (ortho) {   // the height the perspective camera sees at the target
       view.orthoHalf = dist * Math.tan((view.persp.fov * Math.PI / 180) / 2);
-      view.ortho.zoom = 1; view.ortho.near = 0.1; view.ortho.far = Math.max(from.far, dist * 20);
+      view.ortho.zoom = 1;
+      placeOrtho();
       orthoFrustum();
     } else {       // move the perspective camera so it shows what the orthographic one did
       const half = view.orthoHalf / (view.ortho.zoom || 1);
@@ -575,6 +592,7 @@ function setSetting(key, v) {   // through the settings form, so it is saved and
   if (app.result && app.result.source === 'slice') setDirty(true);
   app.hooks.forEach((h) => h(app.spec.find((f) => f.key === key) || { key, group: '' }));
   if (key.startsWith('seam')) updateSeamViz();
+  if (STRATEGY_KEYS.has(key)) updateStrategyViz();
 }
 function parseSeamPath(text) {
   return String(text || '').split(';').map((p) => p.split(',').map(Number)).filter((v) => v.length >= 3 && v.every(Number.isFinite));
@@ -784,7 +802,7 @@ function initPlaneDrag() {
   el.addEventListener('pointerup', end, true);
   el.addEventListener('pointercancel', end, true);
 }
-const STRATEGY_KEYS = new Set(['print_strategy', 'slice_angle', 'slice_direction', 'base_height', 'layer_height']);
+const STRATEGY_KEYS = new Set(['print_strategy', 'slice_angle', 'slice_direction', 'base_height', 'layer_height', 'first_layer_height', 'curve_points']);
 function strategyAxes() {   // slice frame R = Rz(direction) Ry(angle): u = column 0, v = column 1, n = column 2 (layer normal)
   const t = Number(app.values.slice_angle || 0) * Math.PI / 180, p = Number(app.values.slice_direction || 0) * Math.PI / 180;
   return {
@@ -794,7 +812,7 @@ function strategyAxes() {   // slice frame R = Rz(direction) Ry(angle): u = colu
   };
 }
 // contour lines where the planes dot(p, n) = d (d in ds) cut the mesh, kept where bed z >= zmin
-function meshContours(pos, n, ds, zmin) {
+function meshContours(pos, n, ds, zmin, near = null, radius = Infinity) {
   const out = [];
   const h = new Float32Array(3), P = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
   const A = new THREE.Vector3(), B = new THREE.Vector3(), e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), N = new THREE.Vector3();
@@ -817,17 +835,27 @@ function meshContours(pos, n, ds, zmin) {
       if (m !== 2) continue;
       if (A.z < zmin && B.z < zmin) continue;
       if (A.z < zmin) A.lerp(B, (zmin - A.z) / (B.z - A.z)); else if (B.z < zmin) B.lerp(A, (zmin - B.z) / (A.z - B.z));
+      if (near && A.distanceTo(near) > radius) continue;
       out.push(A.x + N.x, A.y + N.y, A.z + N.z, B.x + N.x, B.y + N.y, B.z + N.z);
     }
   }
   return new Float32Array(out);
 }
-function updateStrategyViz(quick = false) {
+function clearStrategyViz() {
   if (view.strategy) {
     view.scene.remove(view.strategy);
     view.strategy.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
     view.strategy = null;
   }
+  view.curveHandles = null;
+}
+function updateStrategyViz(quick = false) {
+  const curve = !!(view.mesh && app.values && app.values.print_strategy === 'curve');
+  if ($('curvePanel')) $('curvePanel').hidden = !curve;
+  if (curve) fillCurveParts();
+  if (curve) { if (!curveDrag.active) updateCurveViz(); return; }
+  curveViz.token++;
+  clearStrategyViz();
   if (!view.mesh || !app.values || app.values.print_strategy !== 'angled') return;
   const pal = palette(), pos = view.meshPos;
   const { u, v, n } = strategyAxes();
@@ -889,6 +917,276 @@ function updateStrategyViz(quick = false) {
   view.strategy = g;
   view.scene.add(g);
   updateVisibility();
+}
+// ---- curve strategy: the curve, its control points (drag them) and some of its layer planes, drawn on the part ----
+const curveViz = { token: 0, data: null };
+const curveDrag = { active: false, index: -1, plane: new THREE.Plane(), pts: null, hover: false };
+const curveTool = { mode: null, pts: [], strokes: [] };       // 'edge': click an edge, 'draw': paint the curve
+const CURVE_HINT = 'Every layer is square to the curve. Drag a dot on the part to bend the curve; it moves in the plane facing you.';
+// the guide parts that can give the curve: every part on the bed
+function fillCurveParts() {
+  const sel = $('curvePart');
+  if (!sel) return;
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">Curve from another part…</option>';
+  (app.model?.parts || []).forEach((p) => sel.add(new Option(p.name, p.id)));
+  if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
+}
+async function showPickableEdges(on) {   // Pick edge: the edges that can be picked, drawn on the part
+  if (view.curveEdges) { view.scene.remove(view.curveEdges); view.curveEdges.geometry.dispose(); view.curveEdges = null; }
+  if (!on) return;
+  try {
+    const res = await (await postJSON('/api/curve/from', { settings: app.values, source: 'edges' })).json();
+    if (curveTool.mode !== 'edge') return;
+    const flat = res.parts.flatMap((p) => p.segs);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(flat), 3));
+    view.curveEdges = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: palette().base, depthTest: false, transparent: true, opacity: 0.75 }));
+    view.curveEdges.renderOrder = 11;
+    view.scene.add(view.curveEdges);
+    if (!flat.length) toast('This part has no sharp edges to follow. Draw a line on it instead.', 'warn', 5000);
+  } catch (e) { toast(e.message, 'error'); }
+}
+function drawCurveStroke() {   // the line being painted (Draw line)
+  if (view.curveStroke) { view.scene.remove(view.curveStroke); view.curveStroke.geometry.dispose(); view.curveStroke = null; }
+  if (curveTool.mode !== 'draw' || curveTool.pts.length < 1) return;
+  const pts = curveTool.pts.map((p) => new THREE.Vector3(...p));
+  if (pts.length === 1) pts.push(pts[0].clone());
+  view.curveStroke = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color: palette().base, depthTest: false, transparent: true }));
+  view.curveStroke.renderOrder = 11;
+  view.scene.add(view.curveStroke);
+}
+async function updateCurveViz() {
+  const my = ++curveViz.token;
+  let res;
+  try {
+    const r = await postJSON('/api/curve', { settings: app.values });
+    res = await r.json();
+    if (!r.ok) throw new Error(res.error || 'curve');
+  } catch (e) { return; }
+  if (my !== curveViz.token || app.values.print_strategy !== 'curve' || !view.mesh) return;
+  curveViz.data = res;
+  drawCurve(res.points);
+}
+function drawCurve(points, quick = false) {
+  const res = curveViz.data;
+  clearStrategyViz();
+  if (!res || !view.mesh) return;
+  const pal = palette(), g = new THREE.Group(), pos = view.meshPos;
+  const box = new THREE.Box3().setFromObject(view.mesh);
+  const size = box.getSize(new THREE.Vector3()).length();
+  if (!quick && pos) {   // where some of the layer planes cut the part
+    const segs = [];
+    for (const p of res.planes) {
+      const n = new THREE.Vector3(...p.n), c = new THREE.Vector3(...p.c);
+      segs.push(meshContours(pos, n, [c.dot(n)], -Infinity, c, res.reach * 1.3 + 5));
+    }
+    const all = new Float32Array(segs.reduce((k, a) => k + a.length, 0));
+    let o = 0; segs.forEach((a) => { all.set(a, o); o += a.length; });
+    const lines = new THREE.BufferGeometry();
+    lines.setAttribute('position', new THREE.BufferAttribute(all, 3));
+    g.add(new THREE.LineSegments(lines, new THREE.LineBasicMaterial({ color: pal.plane })));
+  }
+  // the curve (while dragging: straight lines through the points)
+  const linePts = (quick ? points : res.line).map((p) => new THREE.Vector3(...p));
+  const curveLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(linePts),
+    new THREE.LineBasicMaterial({ color: pal.base, depthTest: false, transparent: true }));
+  curveLine.renderOrder = 9;
+  g.add(curveLine);
+  // control points: drag them
+  const r = Math.max(3, size * 0.012);
+  view.curveHandles = points.map((p, i) => {
+    const hot = curveDrag.index === i && (curveDrag.active || curveDrag.hover);
+    const m = new THREE.Mesh(new THREE.SphereGeometry(hot ? r * 1.35 : r, 20, 12),
+      new THREE.MeshBasicMaterial({ color: hot ? pal.base : pal.plane, depthTest: false, transparent: true }));
+    m.position.set(...p); m.renderOrder = 10; m.userData.index = i;
+    g.add(m);
+    return m;
+  });
+  if (!curveTool.mode) $('curveState').textContent = res.auto ? `middle line · ${points.length} points` : `${points.length} points`;
+  g.renderOrder = 3;
+  view.strategy = g;
+  view.scene.add(g);
+  updateVisibility();
+}
+function formatCurve(points) { return points.map((p) => p.map((c) => (+c).toFixed(1)).join(',')).join('; '); }
+function initCurveTools() {
+  const el = view.renderer.domElement, ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+  const pick = (ev) => {
+    const r = el.getBoundingClientRect();
+    ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ndc, view.camera);
+    return ray;
+  };
+  const handleAt = (ev) => {
+    if (!view.curveHandles || !view.strategy || !view.strategy.visible) return -1;
+    const h = pick(ev).intersectObjects(view.curveHandles, false)[0];
+    return h ? h.object.userData.index : -1;
+  };
+  el.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0) return;
+    const i = handleAt(ev);
+    if (i < 0) return;
+    curveDrag.active = true; curveDrag.index = i;
+    curveDrag.pts = curveViz.data.points.map((p) => p.slice());
+    const p = new THREE.Vector3(...curveDrag.pts[i]);
+    curveDrag.plane.setFromNormalAndCoplanarPoint(view.camera.getWorldDirection(new THREE.Vector3()).negate(), p);
+    view.controls.enabled = false;
+    el.setPointerCapture(ev.pointerId);
+    el.style.cursor = 'grabbing';
+    ev.preventDefault(); ev.stopImmediatePropagation();
+  }, true);
+  el.addEventListener('pointermove', (ev) => {
+    if (!curveDrag.active) {
+      const i = handleAt(ev), h = i >= 0;
+      if (h !== curveDrag.hover || (h && i !== curveDrag.index)) {
+        curveDrag.hover = h; curveDrag.index = i;
+        el.style.cursor = h ? 'grab' : '';
+        if (curveViz.data) drawCurve(curveViz.data.points);
+        if (h) setStatusNote('Drag to move this curve point (it moves in the plane facing you).');
+      }
+      return;
+    }
+    const q = pick(ev).ray.intersectPlane(curveDrag.plane, new THREE.Vector3());
+    if (!q) return;
+    if (curveDrag.index === 0) q.z = Math.max(q.z, 0);       // the first point stays on or above the bed
+    curveDrag.pts[curveDrag.index] = [q.x, q.y, q.z];
+    setStatusNote(`Curve point ${curveDrag.index + 1}: ${q.toArray().map((v) => fmt(v, 1)).join(', ')}`);
+    cancelAnimationFrame(curveDrag.frame);
+    curveDrag.frame = requestAnimationFrame(() => drawCurve(curveDrag.pts, true));
+  }, true);
+  const end = (ev) => {
+    if (!curveDrag.active) return;
+    curveDrag.active = false;
+    view.controls.enabled = true;
+    el.style.cursor = '';
+    try { el.releasePointerCapture(ev.pointerId); } catch (_) { /* already released */ }
+    setSetting('curve_points', formatCurve(curveDrag.pts));
+  };
+  el.addEventListener('pointerup', end, true);
+  el.addEventListener('pointercancel', end, true);
+  $('curveFind').addEventListener('click', async () => {
+    setCurveTool(null);
+    try {
+      const res = await (await postJSON('/api/curve', { settings: { ...app.values, curve_points: '' } })).json();
+      setSetting('curve_points', formatCurve(res.points));
+      toast(`Curve found: ${res.points.length} points. Drag them to change it, then slice.`, 'info', 4000);
+    } catch (e) { toast(e.message, 'error'); }
+  });
+  $('curveReset').addEventListener('click', () => { setCurveTool(null); setSetting('curve_points', ''); });
+
+  // ---- other curve sources: an edge of the part, a line painted on it, another part ----
+  const defaults = { ...view.controls.mouseButtons };
+  const hints = {
+    edge: 'Click near one of the highlighted edges: the curve follows it until it turns a corner. Esc cancels.',
+    draw: 'Left-drag on the part to paint the curve, bottom to top. Right-drag turns the view. Enter or Done finishes, Backspace undoes, Esc cancels.',
+  };
+  const setCurveTool = (m) => {
+    curveTool.mode = m;
+    if (m !== 'draw') { curveTool.pts = []; curveTool.strokes = []; }
+    $('curveEdge').classList.toggle('on', m === 'edge');
+    $('curveDraw').classList.toggle('on', m === 'draw');
+    $('curveDraw').textContent = m === 'draw' ? 'Done' : 'Draw line';
+    $('curveUndo').hidden = m !== 'draw';
+    $('curveHint').textContent = m ? hints[m] : CURVE_HINT;
+    if (m) $('curveState').textContent = '';
+    view.controls.mouseButtons = m === 'draw' ? { LEFT: null, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE } : { ...defaults };
+    el.style.cursor = m ? 'crosshair' : '';
+    if (m && app.mode !== 'prepare') setMode('prepare');
+    drawCurveStroke();
+    showPickableEdges(m === 'edge');
+    if (!m && curveViz.data) drawCurve(curveViz.data.points);
+  };
+  const hitPart = (ev) => {
+    if (!view.mesh) return null;
+    view.modelMat.side = THREE.DoubleSide;
+    return pick(ev).intersectObject(view.mesh, true)[0] || null;
+  };
+  const useLine = async (pts) => {
+    try {
+      const r = await postJSON('/api/curve/from', { settings: app.values, source: 'line', points: pts });
+      const res = await r.json();
+      if (!r.ok) throw new Error(res.error);
+      setSetting('curve_points', formatCurve(res.points));
+      toast(`Curve drawn: ${res.points.length} points. Drag them to adjust, then slice.`, 'info', 4000);
+    } catch (e) { toast(e.message, 'error'); }
+  };
+  const finishDraw = () => {
+    const pts = curveTool.pts.slice();
+    setCurveTool(null);
+    if (pts.length >= 2) useLine(pts); else toast('Draw a longer line on the part.', 'warn', 3000);
+  };
+  $('curveEdge').addEventListener('click', () => setCurveTool(curveTool.mode === 'edge' ? null : 'edge'));
+  $('curveDraw').addEventListener('click', () => {
+    if (curveTool.mode === 'draw') return finishDraw();
+    curveTool.pts = []; curveTool.strokes = [];
+    setCurveTool('draw');
+  });
+  $('curveUndo').addEventListener('click', () => { curveTool.pts.splice(curveTool.strokes.pop() ?? 0); drawCurveStroke(); });
+  $('curvePartUse').addEventListener('click', async () => {
+    const id = Number($('curvePart').value);
+    if (!id) return toast('Choose the part whose middle line the layers should follow.', 'warn', 3500);
+    setCurveTool(null);
+    const part = (app.model?.parts || []).find((p) => p.id === id);
+    try {
+      const r = await postJSON('/api/curve/from', { settings: app.values, source: 'part', id });
+      const res = await r.json();
+      if (!r.ok) throw new Error(res.error);
+      setSetting('curve_points', formatCurve(res.points));
+      const others = (app.model?.parts || []).length > 1;
+      if (others && confirm(`Curve taken from "${part?.name || 'the part'}" (${res.points.length} points).\n\nTake that part off the bed so it is not printed? Undo brings it back.`)) {
+        app.selected = id;
+        await partAction('delete');
+      } else toast(`Curve taken from "${part?.name || 'the part'}": ${res.points.length} points.`, 'info', 4000);
+    } catch (e) { toast(e.message, 'error'); }
+  });
+  let down = null, painting = false;
+  el.addEventListener('pointerdown', (ev) => {
+    if (!curveTool.mode || ev.button !== 0) return;
+    down = [ev.clientX, ev.clientY];
+    if (curveTool.mode === 'draw') {
+      const h = hitPart(ev);
+      if (!h) return;
+      painting = true;
+      curveTool.strokes.push(curveTool.pts.length);
+      curveTool.pts.push(h.point.toArray());
+      el.setPointerCapture(ev.pointerId);
+      drawCurveStroke();
+      ev.stopImmediatePropagation();
+    }
+  }, true);
+  el.addEventListener('pointermove', (ev) => {
+    if (!painting) return;
+    const h = hitPart(ev);
+    if (!h) return;
+    const last = curveTool.pts[curveTool.pts.length - 1];
+    if (h.point.distanceTo(new THREE.Vector3(...last)) < 3) return;     // a point every 3 mm
+    curveTool.pts.push(h.point.toArray());
+    cancelAnimationFrame(curveTool.frame);
+    curveTool.frame = requestAnimationFrame(drawCurveStroke);
+  }, true);
+  el.addEventListener('pointerup', async (ev) => {
+    if (painting) { painting = false; try { el.releasePointerCapture(ev.pointerId); } catch (_) { /* released */ } return; }
+    if (curveTool.mode !== 'edge' || !down || Math.hypot(ev.clientX - down[0], ev.clientY - down[1]) > 4) return;   // a drag turns the view
+    down = null;
+    const h = hitPart(ev);
+    if (!h) return toast('Click on an edge of the part.', 'warn', 2500);
+    try {
+      const r = await postJSON('/api/curve/from', { settings: app.values, source: 'edge', id: h.object.userData.id, point: h.point.toArray() });
+      const res = await r.json();
+      if (!r.ok) throw new Error(res.error);
+      setCurveTool(null);
+      setSetting('curve_points', formatCurve(res.points));
+      toast(`Curve along the edge: ${res.points.length} points. Drag them to adjust, then slice.`, 'info', 4000);
+    } catch (e) { toast(e.message, 'warn', 5000); }
+  }, true);
+  window.addEventListener('keydown', (ev) => {
+    if (!curveTool.mode || ev.target.matches('input, textarea, select')) return;
+    if (ev.key === 'Escape') setCurveTool(null);
+    else if (ev.key === 'Enter' && curveTool.mode === 'draw') finishDraw();
+    else if (ev.key === 'Backspace' && curveTool.mode === 'draw') { curveTool.pts.pop(); drawCurveStroke(); ev.preventDefault(); }
+  });
 }
 function clearMesh() {
   if (view.mesh) { view.scene.remove(view.mesh); view.mesh.children.forEach((m) => m.geometry.dispose()); view.mesh = null; }
@@ -1182,12 +1480,13 @@ function buildBeads() {
   const col = new THREE.Color();
   view.beads = [];
   const strat = app.result.stats && app.result.stats.strategy;
-  const tilted = strat ? new THREE.Vector3(...strat.normal) : null;
+  const tilted = strat && strat.normal ? new THREE.Vector3(...strat.normal) : null;
   for (let L = 0; L < nl; L++) {
     const a = eo[L], b = eo[L + 1];
     if (b <= a) { view.beads.push(null); continue; }
     up.set(0, 0, 1);
-    if (tilted && L >= strat.flat_layers) up.copy(tilted);      // angled layers: beads lie on the tilted plane
+    if (strat && strat.normals && strat.normals[L]) up.set(...strat.normals[L]);   // curved layers: each on its own plane
+    else if (tilted && L >= strat.flat_layers) up.copy(tilted);      // angled layers: beads lie on the tilted plane
     const mesh = new THREE.InstancedMesh(view.beadGeo, view.beadMat, b - a);
     for (let i = a; i < b; i++) {
       const o = i * FLOATS, e = app.ext;
@@ -1235,6 +1534,15 @@ function overhangColor(a, kind, limit, c) {
   if (a > limit) return c.setHex(palette().danger);
   return rampColor(1 - a / Math.max(limit, 1), c);                          // flat on the layer below .. at the limit
 }
+// colour by a value of each layer (preview): colour mode -> key in stats.per_layer
+const LAYER_COLOR = { layer_time: 'time_s', layer_path: 'path_mm' };   // layer_height: each bead's own thickness (column 11)
+const LAYER_UNITS = {
+  time_s: (v) => clockShort(v), path_mm: (v) => `${fmt(v / 1000, 2)} m`, height_mm: (v) => `${fmt(v, 2)} mm`,
+  mass_g: (v) => (v >= 1000 ? `${fmt(v / 1000, 2)} kg` : `${fmt(v, 0)} g`), flow_mm3s: (v) => `${fmt(v, 0)} mm³/s`,
+};
+const clockShort = (s) => { const m = Math.floor(s / 60), x = Math.round(s % 60); return x === 60 ? `${m + 1}:00` : `${m}:${String(x).padStart(2, '0')}`; };
+const flowArea = () => (app.values.e_mode === 'filament' ? Math.PI * (Number(app.values.filament_diameter) / 2) ** 2 : 1);
+function layerValues(key) { return app.result?.stats?.per_layer?.[key] || null; }
 function buildColors() {
   if (!app.ext) return;
   const mode = $('colorMode').value;
@@ -1244,7 +1552,10 @@ function buildColors() {
   const col = new Float32Array(n * 6);
   const maxL = app.result.stats.flow_max_level || 7;
   let smin = Infinity, smax = -Infinity;
-  if (mode === 'speed') for (let i = 0; i < n; i++) { const v = app.ext[i * FLOATS + 9]; smin = Math.min(smin, v); smax = Math.max(smax, v); }
+  const per = LAYER_COLOR[mode] ? layerValues(LAYER_COLOR[mode]) : null;
+  const value = mode === 'speed' ? (o) => app.ext[o + 9] : mode === 'flow' ? (o) => app.ext[o + 10] * app.ext[o + 9] * flowArea()
+    : mode === 'layer_height' ? (o) => app.ext[o + 11] : per ? (o) => per[app.ext[o + 8]] : null;
+  if (value) for (let i = 0; i < n; i++) { const v = value(i * FLOATS); if (Number.isFinite(v)) { smin = Math.min(smin, v); smax = Math.max(smax, v); } }
   const kindCols = palette().kinds;
   const c = new THREE.Color();
   for (let i = 0; i < n; i++) {
@@ -1252,7 +1563,7 @@ function buildColors() {
     if (mode === 'kind') c.copy(kindCols[app.ext[o + 6]] || kindCols[3]);
     else if (mode === 'level') c.copy(levelColor(app.ext[o + 7], maxL));
     else if (mode === 'overhang') { if (app.overhang) overhangColor(app.overhang[i], app.ext[o + 6], limit, c); else c.copy(palette().kindNone); }
-    else { const t = smax > smin ? (app.ext[o + 9] - smin) / (smax - smin) : 1; rampColor(t, c); }
+    else { const t = smax > smin ? (value(o) - smin) / (smax - smin) : 1; rampColor(t, c); }
     col.set([c.r, c.g, c.b, c.r, c.g, c.b], i * 6);
   }
   app.colors = col; app.speedRange = [smin, smax];
@@ -1297,6 +1608,7 @@ function updateLayers() {
     view.scene.add(view.trvObj);
 
     $('layerLabel').textContent = `${top + 1}`;
+    renderLayerInfo();
     $('layerZ').textContent = `${fmt(app.result.layer_z[top] ?? 0, 2)} mm`;
     applyCut();
     updateVisibility();
@@ -1388,6 +1700,7 @@ function updateVisibility() {
   if (view.seamPts) view.seamPts.visible = preview;
   $('legend').hidden = !preview;
   $('layerBox').hidden = !preview;
+  if ($('layerInfo')) $('layerInfo').hidden = !preview || !app.result?.stats?.per_layer;
 }
 function renderLegend() {
   const box = $('legendItems');
@@ -1421,11 +1734,75 @@ function renderLegend() {
     const d = document.createElement('div'); d.className = 'muted';
     d.textContent = oh ? `Steepest ${fmt(oh.max, 0)}° · limit: Max overhang angle (Material)` : 'Limit: Max overhang angle (Material)';
     box.appendChild(d);
-  } else {
+  } else if (mode === 'speed') {
     const [a, b] = app.speedRange || [0, 0];
     item('var(--ramp-4)', 'Fast', `${fmt(b, 0)} mm/s`);
     item('var(--ramp-0)', 'Slow', `${fmt(a, 0)} mm/s`);
+  } else {
+    const [a, b] = app.speedRange || [0, 0];
+    const unit = mode === 'flow' ? LAYER_UNITS.flow_mm3s : mode === 'layer_height' ? LAYER_UNITS.height_mm : LAYER_UNITS[LAYER_COLOR[mode]];
+    const name = { flow: ['Most flow', 'Least flow'], layer_time: ['Longest layer', 'Shortest layer'],
+      layer_path: ['Longest path', 'Shortest path'], layer_height: ['Thickest', 'Thinnest'] }[mode] || ['High', 'Low'];
+    if (Number.isFinite(a)) {
+      item('var(--ramp-4)', name[0], unit(b));
+      item('var(--ramp-2)', 'Middle', unit((a + b) / 2));
+      item('var(--ramp-0)', name[1], unit(a));
+    }
   }
+}
+// ---- layer data card (preview): the shown top layer's numbers and a chart of one value over all layers ----
+function renderLayerInfo() {
+  const box = $('layerInfo');
+  const pl = app.result?.stats?.per_layer;
+  if (!box || !pl) return;
+  const L = Number($('layerRange').value), nl = pl.time_s.length;
+  const strat = app.result.stats.strategy;
+  $('liTitle').textContent = `Layer ${L + 1} of ${nl}`;
+  const z = app.result.layer_z[L] ?? 0;
+  // the beads' own thickness on this layer (curved layers are thicker on the outside of a bend)
+  let tmin = Infinity, tmax = -Infinity;
+  const eo = app.result.extrude_offsets;
+  if (app.ext && eo) for (let i = eo[L]; i < eo[L + 1]; i++) { const h = app.ext[i * FLOATS + 11]; if (h > 0) { tmin = Math.min(tmin, h); tmax = Math.max(tmax, h); } }
+  const range = tmax - tmin > 0.01 ? ` · ${fmt(tmin, 2)}–${fmt(tmax, 2)}` : '';
+  const rows = [
+    [strat && strat.curve && L >= strat.flat_layers ? 'Along the curve' : 'Z', `${fmt(z, 2)} mm`],
+    ['Layer height', LAYER_UNITS.height_mm(pl.height_mm[L] ?? 0) + range],
+    ['Layer time', LAYER_UNITS.time_s(pl.time_s[L] ?? 0)],
+    ['Path length', LAYER_UNITS.path_mm(pl.path_mm[L] ?? 0)],
+    ['Travel', LAYER_UNITS.path_mm(pl.travel_mm[L] ?? 0)],
+    ['Material', LAYER_UNITS.mass_g(pl.mass_g[L] ?? 0)],
+    ['Peak flow', LAYER_UNITS.flow_mm3s(pl.flow_mm3s[L] ?? 0)],
+  ];
+  const grid = $('liGrid');
+  grid.innerHTML = '';
+  rows.forEach(([k, v]) => { const a = document.createElement('span'), b = document.createElement('span'); a.textContent = k; b.textContent = v; grid.append(a, b); });
+  drawLayerChart();
+}
+function drawLayerChart() {
+  const pl = app.result?.stats?.per_layer, c = $('liChart');
+  if (!pl || !c) return;
+  const key = $('liMetric').value, vals = pl[key] || [], nl = vals.length;
+  const g = c.getContext('2d'), W = c.width, H = c.height, pad = 6;
+  const pal = palette();
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = cssColor('--panel-2').getStyle(); g.fillRect(0, 0, W, H);
+  if (!nl) return;
+  const hi = Math.max(...vals, 1e-9), lo = Math.min(0, ...vals);
+  const L = Number($('layerRange').value);
+  const bw = (W - 2 * pad) / nl;
+  for (let i = 0; i < nl; i++) {
+    const t = (vals[i] - lo) / (hi - lo || 1);
+    const h = Math.max(1, t * (H - 2 * pad));
+    g.fillStyle = (i === L ? cssColor('--accent') : rampColor(t, new THREE.Color())).getStyle();
+    g.globalAlpha = i <= L ? 1 : 0.35;
+    g.fillRect(pad + i * bw, H - pad - h, Math.max(bw - (bw > 3 ? 1 : 0), 1), h);
+  }
+  g.globalAlpha = 1;
+  g.strokeStyle = cssColor('--accent').getStyle(); g.lineWidth = 2;
+  const x = pad + (L + 0.5) * bw; g.beginPath(); g.moveTo(x, 2); g.lineTo(x, H - 2); g.stroke();
+  $('liRange').textContent = `${LAYER_UNITS[key](Math.min(...vals))} – ${LAYER_UNITS[key](hi)}`;
+  $('liLast').textContent = `layer ${nl}`;
+  void pal;
 }
 function renderStats() {
   const st = app.result?.stats;
@@ -1722,7 +2099,19 @@ async function boot() {
   });
   $('showTravel').addEventListener('change', updateVisibility);
   $('showModel').addEventListener('change', updateVisibility);
-  $('colorMode').addEventListener('change', () => { buildColors(); updateLayers(); renderLegend(); });
+  $('colorMode').addEventListener('change', () => {
+    const key = LAYER_COLOR[$('colorMode').value] || { flow: 'flow_mm3s', layer_height: 'height_mm' }[$('colorMode').value] || null;
+    if (key) $('liMetric').value = key;
+    buildColors(); updateLayers(); renderLegend();
+  });
+  $('liMetric').addEventListener('change', drawLayerChart);
+  $('liChart').addEventListener('click', (ev) => {
+    const nl = app.result?.stats?.per_layer?.time_s?.length || 0;
+    if (!nl) return;
+    const r = ev.currentTarget.getBoundingClientRect();
+    const L = Math.max(0, Math.min(nl - 1, Math.floor((ev.clientX - r.left) / r.width * nl)));
+    $('layerRange').value = L; app.cut = null; updateLayers();
+  });
   $('profileSelect').addEventListener('change', onProfile);
   $('btnSaveProfile').addEventListener('click', saveProfile);
   $('btnCenter').addEventListener('click', () => applyTransform(true, true));

@@ -29,11 +29,16 @@ class Toolpath:
     warnings: list = field(default_factory=list)
     # printing strategy (strategy.py): layers >= flat_layers lie on planes tilted by part_R (slice frame -> bed),
     # orient[i] = 1 where the nozzle tilts by `tilt` (4x4). None / defaults = all horizontal, nozzle vertical.
+    # Curved layers (curve.py): orient[i] = k > 0 tilts by tilts[k - 1], one per layer; uv = each move in its layer's
+    # own frame.
     flat_layers: int = None
     part_R: np.ndarray = None
     part_z0: float = 0.0
     tilt: np.ndarray = None
     orient: np.ndarray = None
+    tilts: np.ndarray = None
+    uv: np.ndarray = None
+    thick: np.ndarray = None      # bead thickness of every move where it differs from its layer's height (curved layers)
     overhang: np.ndarray = None   # overhang angle (deg) of every move, walls only (overhang.py)
 
     def __len__(self):
@@ -67,6 +72,12 @@ class Planner:
         self._outer = (None, [])  # (layer, its outer wall loops): tells holes from outer boundaries
         self.pattern_ctx = None   # surface pattern: part centre, picture, paint (pattern.context)
         self.pattern_surface = None   # ... the part's surface for the slope and picked-surface masks
+        self.layer_seams = None       # {layer index: seam point}: given per layer (curved layers, curve.seam_targets)
+
+    def reversed_on(self, layer):
+        """Loops are counter-clockwise from the slicer; wall_direction turns them clockwise, always or every other layer."""
+        d = self.s.get('wall_direction', 'ccw')
+        return d == 'cw' or (d == 'alternate' and layer.index % 2 == 1)
 
     def _air_sign(self, path, layer):
         """+1 if the air is outside this CCW outer wall loop (an outer boundary), -1 if inside it (a hole)."""
@@ -119,6 +130,8 @@ class Planner:
     def seam_target(self, pts, layer, kind=KIND_OUTER):
         """Point the loop should start closest to, for the chosen seam position."""
         s = self.s
+        if self.layer_seams is not None and layer.index in self.layer_seams:
+            return np.asarray(self.layer_seams[layer.index], dtype=float)
         mode = s['seam']
         here = np.array(self.pos[:2]) if self.pos else None
         if mode == 'nearest' and here is not None:
@@ -251,13 +264,14 @@ class Planner:
         scarf: every loop is self-contained: rise over the ramp, go round, then pass over the ramp again filling the
               wedge (ends one ramp length past the seam). Use it with random / nearest seams."""
         s = self.s
-        loop = self.loop_from_seam(path.pts, layer, path.kind)
+        rev = self.reversed_on(layer)
+        loop = self.loop_from_seam(path.pts[::-1] if rev else path.pts, layer, path.kind)
         uneven = s['point_mode'] == 'simplify'
         if point_control.active(s, path.kind in (KIND_OUTER, KIND_INNER, KIND_BRIM)):
             loop = point_control.control(loop, s, closed=True)       # points start at the seam
         seam0 = loop[0].copy()                                         # the seam on the plain wall (pattern moves it)
         if path.kind == KIND_OUTER and surface_pattern.active(s):
-            loop = surface_pattern.apply(loop, s, True, layer.index, self._air_sign(path, layer),
+            loop = surface_pattern.apply(loop, s, True, layer.index, self._air_sign(path, layer) * (-1.0 if rev else 1.0),
                                          model_z=layer.z - layer.height / 2 - layer.shift, ctx=self.pattern_ctx,
                                          key=id(path))
         per = float(np.hypot(*np.diff(loop, axis=0).T).sum())
@@ -266,7 +280,9 @@ class Planner:
         walls = (KIND_OUTER, KIND_INNER) if s['ramp_walls'] == 'all_walls' else (KIND_OUTER,)
         mode = s['layer_change']
         ramp = (mode in ('ramp', 'scarf') and layer.index > 0 and path.kind in walls and s['ramp_length'] > 0 and per > 1e-6)
-        stacked = mode == 'ramp' and s['seam'] in ('aligned', 'custom', 'rear', 'direction', 'path')   # seams of consecutive layers coincide
+        # seams of consecutive layers coincide (and the loops run the same way, so a ramp can lie on the one below)
+        stacked = mode == 'ramp' and s['seam'] in ('aligned', 'custom', 'rear', 'direction', 'path') and \
+            s.get('wall_direction', 'ccw') != 'alternate'
         w = s['line_width']
         below = [pl for sp, pl in self.prev_ramps.get(path.kind, []) if np.hypot(*(sp - seam0)) <= w]
         ramped_below = bool(below)
@@ -328,7 +344,8 @@ class Planner:
             pts = point_control.control(pts, self.s, closed=path.closed)
         if path is layer.spiral and surface_pattern.active(self.s):   # one spiral vase turn
             plain = pts
-            pts = surface_pattern.apply(pts, self.s, False, layer.index, 1.0, spiral=True, u0=self._spiral_u,
+            pts = surface_pattern.apply(pts, self.s, False, layer.index, -1.0 if self.s.get('wall_direction') == 'cw' else 1.0,
+                                        spiral=True, u0=self._spiral_u,
                                         z_shift=layer.shift, ctx=self.pattern_ctx, key=id(path),
                                         spiral_state=self._spiral_state)
             self._spiral_u += float(np.hypot(*np.diff(plain[:, :2], axis=0).T).sum())
@@ -489,6 +506,31 @@ def flow_levels(tp, s):
     return level, full, max_level, seg, de, per_mm, rate, ext
 
 
+def per_layer(tp, s, t, seg, de, ext, rate, nl):
+    """Numbers for each layer (preview chart and colours): time (s), extruded path (mm), travel (mm), layer height (mm),
+    material (g) and peak flow (mm3/s)."""
+    lz = np.asarray(tp.layer_z, dtype=float)
+    lz = np.concatenate([lz, np.full(max(nl - len(lz), 0), lz[-1] if len(lz) else 0.0)])[:nl]
+    height = np.diff(np.concatenate([[0.0], lz])) if nl else np.zeros(0)
+    if nl and lz[0] > 0:
+        height[0] = lz[0]
+    vol = de * (1.0 if s['e_mode'] == 'volumetric' else math.pi * (s['filament_diameter'] / 2) ** 2)
+    per_s = rate * (1.0 if s['e_mode'] == 'volumetric' else math.pi * (s['filament_diameter'] / 2) ** 2)
+    L = tp.layer
+    flow = np.zeros(nl)
+    if ext.any():
+        np.maximum.at(flow, L[ext], per_s[ext])
+    r = lambda a, d=3: np.round(a, d).tolist()   # noqa: E731
+    return {
+        'time_s': r(np.bincount(L, weights=t, minlength=nl), 2),
+        'path_mm': r(np.bincount(L[ext], weights=seg[ext], minlength=nl), 1),
+        'travel_mm': r(np.bincount(L[tp.kind == KIND_TRAVEL], weights=seg[tp.kind == KIND_TRAVEL], minlength=nl), 1),
+        'height_mm': r(height, 3),
+        'mass_g': r(np.bincount(L[ext], weights=vol[ext], minlength=nl) / 1000.0 * s['density'], 2),
+        'flow_mm3s': r(flow, 1),
+    }
+
+
 def analyze(tp, s):
     n = len(tp)
     if n == 0:
@@ -525,6 +567,7 @@ def analyze(tp, s):
         'io_switches_est': switches,
         'layer_time_min': float(layer_time.min()),
         'layer_time_max': float(layer_time.max()),
+        'per_layer': per_layer(tp, s, t, seg, de, ext, rate, nl),
         'bbox': bbox,
         'by_kind_mm': {KIND_NAMES[k]: float(seg[(tp.kind == k) & ext].sum()) for k in EXTRUDING},
     }

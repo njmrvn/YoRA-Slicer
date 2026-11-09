@@ -104,6 +104,10 @@
           <option value="level">Extruder flow level (DO)</option>
           <option value="speed">Speed</option>
           <option value="overhang">Overhang angle</option>
+          <option value="flow">Flow rate</option>
+          <option value="layer_time">Layer time</option>
+          <option value="layer_path">Layer path length</option>
+          <option value="layer_height">Layer height</option>
         </select>
       </div>
       <div id="legendItems"></div>
@@ -123,6 +127,19 @@
       <div class="layer-label" id="layerLabel">—</div>
       <input type="range" id="layerRange" min="0" max="0" value="0" orient="vertical" aria-label="Top layer">
       <div class="layer-label small" id="layerZ"></div>
+    </div>
+    <div class="layer-info" id="layerInfo" hidden>
+      <div class="li-head"><b id="liTitle">Layer</b>
+        <select id="liMetric" aria-label="Chart of each layer">
+          <option value="time_s">Layer time</option>
+          <option value="path_mm">Path length</option>
+          <option value="height_mm">Layer height</option>
+          <option value="mass_g">Material</option>
+          <option value="flow_mm3s">Peak flow</option>
+        </select></div>
+      <div class="li-grid" id="liGrid"></div>
+      <canvas id="liChart" width="456" height="132" title="Each layer's value; click to go to a layer"></canvas>
+      <div class="li-axis muted small"><span>layer 1</span><span id="liRange"></span><span id="liLast"></span></div>
     </div>
     <div class="progress" id="progress" hidden><div class="bar" id="progressBar"></div><span id="progressText"></span></div>
     <div class="play-bar" id="playBar" hidden>
@@ -192,6 +209,20 @@
           <button id="seamReset" class="btn small" title="Back to aligned seams">Reset</button>
         </div>
         <div class="muted small" id="seamHint">Pick a point or draw a line on the part to place the seam. More options under Seam &amp; layer change.</div>
+      </section>
+
+      <section class="card" id="curvePanel" hidden>
+        <header class="card-head"><h2>Curve</h2><span class="muted small" id="curveState"></span></header>
+        <div class="row-btns seam-tools">
+          <button id="curveFind" class="btn small" title="The middle line of the part, kept as your curve so you can drag its points">Middle line</button>
+          <button id="curveEdge" class="btn small" title="Click an edge of the part: the curve follows it (on a STEP part also the borders between its faces)">Pick edge</button>
+          <button id="curveDraw" class="btn small" title="Paint the curve on the part's surface, bottom to top">Draw line</button>
+          <button id="curveUndo" class="btn small" hidden>Undo</button>
+          <button id="curveReset" class="btn small" title="Back to the middle line found from the part each time you slice">Reset</button>
+        </div>
+        <div class="pick-row"><select id="curvePart" aria-label="Take the curve from another part"><option value="">Curve from another part…</option></select>
+          <button class="btn small" id="curvePartUse" title="Use the middle line of the chosen part (a guide: a bent rod or tube modelled where the print goes). The guide is then taken off the bed so it is not printed.">Use</button></div>
+        <div class="muted small" id="curveHint">Every layer is square to the curve. Drag a dot on the part to bend the curve; it moves in the plane facing you.</div>
       </section>
 
       <section class="card grow">

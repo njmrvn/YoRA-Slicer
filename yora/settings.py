@@ -23,6 +23,12 @@ SPEC = [
     ('Layers & walls', 'first_layer_width_pct', 'First layer width', 'float', 120, {'unit': '%', 'min': 50, 'max': 300}),
     ('Layers & walls', 'walls', 'Walls', 'int', 2, {'min': 0, 'max': 50}),
     ('Layers & walls', 'wall_order', 'Wall order', 'choice', 'inner_first', {'options': ['inner_first', 'outer_first']}),
+    ('Layers & walls', 'wall_placement', 'Wall placement', 'choice', 'inside', {'options': ['inside', 'centered'],
+        'help': 'inside: the bead lies inside the part, its outer edge on the surface (the part keeps its size). '
+                'centered: the middle of the bead is on the surface, half inside and half outside.'}),
+    ('Layers & walls', 'wall_direction', 'Print direction', 'choice', 'ccw', {'options': ['ccw', 'cw', 'alternate'],
+        'help': 'Which way the loops go round, seen from above (from the nozzle on angled and curved layers). '
+                'ccw: counter-clockwise. cw: clockwise. alternate: changes every layer, starting counter-clockwise.'}),
     ('Layers & walls', 'top_layers', 'Top solid layers', 'int', 2, {'min': 0, 'max': 50}),
     ('Layers & walls', 'bottom_layers', 'Bottom solid layers', 'int', 2, {'min': 0, 'max': 50}),
     ('Layers & walls', 'spiral_vase', 'Spiral vase', 'bool', False, {'help': 'One continuous outer wall with Z rising along the path. Bottom layers stay solid.'}),
@@ -83,9 +89,17 @@ SPEC = [
     ('Seam & layer change', 'wipe_length', 'Wipe after loop', 'float', 0, {'unit': 'mm', 'min': 0, 'max': 1000,
         'help': 'Keep moving along the loop this far with the extruder off before travelling, to wipe the nozzle.'}),
 
-    ('Printing strategy', 'print_strategy', 'Layer strategy', 'choice', 'horizontal', {'options': ['horizontal', 'angled'],
+    ('Printing strategy', 'print_strategy', 'Layer strategy', 'choice', 'horizontal', {'options': ['horizontal', 'angled', 'curve'],
         'help': 'horizontal: flat layers. angled: layers on planes tilted by the slicing angle (e.g. 45 deg), so the '
-                'robot can build overhangs out to that angle without support. The planes are shown on the part in Prepare.'}),
+                'robot can build overhangs out to that angle without support. curve: every layer is perpendicular to a '
+                'curve through the part, so a bent part prints along its own bend. The planes are shown on the part in Prepare.'}),
+    ('Printing strategy', 'curve_thickness_by', 'Thicker / thinner layers by', 'choice', 'flow', {'options': ['flow', 'speed'],
+        'help': 'Curve strategy: where the curve bends, a layer is thicker on the outside of the bend than on the inside. '
+                'flow: the speed stays and the extruder gives more or less material. speed: the extruder runs steady and '
+                'the robot slows down where the layer is thicker and speeds up where it is thinner.'}),
+    ('Printing strategy', 'curve_points', 'Curve points', 'text', '', {
+        'help': 'Curve strategy: points the curve passes through, bottom to top (x,y,z; x,y,z; ...). Empty = found '
+                'from the part (its middle line). Find, drag or clear them on the part in Prepare.'}),
     ('Printing strategy', 'slice_angle', 'Slicing plane angle', 'float', 45, {'unit': 'deg', 'min': 0, 'max': 80,
         'help': 'Tilt of the layer planes from horizontal (angled strategy).'}),
     ('Printing strategy', 'slice_direction', 'Tilt direction', 'float', 0, {'unit': 'deg', 'min': -360, 'max': 360,

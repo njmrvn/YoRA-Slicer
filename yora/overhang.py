@@ -95,8 +95,11 @@ def angles(tp, s):
     if n < 2:
         return out
     x, y = tp.x.astype(np.float64), tp.y.astype(np.float64)
-    angled_from = tp.flat_layers if tp.part_R is not None and tp.flat_layers is not None else None
-    if angled_from is not None:   # angled layers: measure in the slice frame (p_s = R^T p)
+    uv = getattr(tp, 'uv', None)
+    angled_from = tp.flat_layers if (tp.part_R is not None or uv is not None) and tp.flat_layers is not None else None
+    if uv is not None and len(uv) == n:   # curved layers: measure each layer in its own frame
+        x, y = uv[:, 0].astype(np.float64), uv[:, 1].astype(np.float64)
+    elif angled_from is not None:   # angled layers: measure in the slice frame (p_s = R^T p)
         Ps = np.column_stack([x, y, tp.z.astype(np.float64)]) @ tp.part_R
         sel = tp.layer >= angled_from
         x, y = np.where(sel, Ps[:, 0], x), np.where(sel, Ps[:, 1], y)

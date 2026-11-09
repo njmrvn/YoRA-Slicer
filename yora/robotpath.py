@@ -219,8 +219,9 @@ def _batch_moves(sv, tp, i0, i1, q_prev, rz, lock, step, printed_z_of):
     N = len(P)
     # flange poses: bed @ transl(p) @ tilt @ rotx(pi) @ rotz(rz) @ inv(tcp); one rotation per nozzle orientation
     o = sv.orient[owner] if sv.orient is not None else np.zeros(N, dtype=int)
+    uo, inv = np.unique(o, return_inverse=True)            # one rotation per nozzle orientation in this stretch
     Ms = np.stack([(sv.tilts[k] @ K.rotx(math.pi) @ K.rotz(math.radians(rz)) if sv.fixed is None else sv.fixed) @ sv.inv_tcp
-                   for k in (0, 1)])[o]
+                   for k in uo])[inv.reshape(-1)]
     bed = sv.bed
     T = np.zeros((N, 4, 4))
     T[:, :3, :3] = bed[:3, :3] @ Ms[:, :3, :3]
@@ -285,7 +286,10 @@ def solve_robot_path(tp, s, robot, progress=None):
     sv.orient = None
     if getattr(tp, 'orient', None) is not None and tp.orient.any():
         sv.orient = tp.orient.astype(int)
-        sv.tilts = [np.eye(4), np.asarray(tp.tilt, dtype=float)]
+        if getattr(tp, 'tilts', None) is not None:          # curved layers: one tilt per layer
+            sv.tilts = [np.eye(4)] + [np.asarray(T, dtype=float) for T in tp.tilts]
+        else:
+            sv.tilts = [np.eye(4), np.asarray(tp.tilt, dtype=float)]
     orient_of = (lambda i: int(sv.orient[i])) if sv.orient is not None else (lambda i: 0)
     joints = np.zeros((n, 6))
     rzs = np.zeros(n)

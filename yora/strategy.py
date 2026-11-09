@@ -157,4 +157,5 @@ def tool_rotation(tp, i):
     orient = getattr(tp, 'orient', None)
     if orient is None or not orient[i]:
         return np.eye(4)
-    return tp.tilt
+    tilts = getattr(tp, 'tilts', None)
+    return tilts[int(orient[i]) - 1] if tilts is not None else tp.tilt

@@ -138,33 +138,7 @@ class Slicer:
     def section(self, z):
         """Oriented closed loops of the mesh cut at height z."""
         sel = np.nonzero((self.zmin <= z) & (self.zmax >= z))[0]
-        if len(sel) == 0:
-            return []
-        T = self.T[sel]
-        d = T[:, :, 2] - z
-        d[d == 0] = 1e-9
-        m = len(sel)
-        E = np.empty((m, 3, 2))
-        C = np.empty((m, 3), dtype=bool)
-        with np.errstate(divide='ignore', invalid='ignore'):
-            for j, (a, b) in enumerate(((0, 1), (1, 2), (2, 0))):
-                da, db = d[:, a], d[:, b]
-                C[:, j] = (da > 0) != (db > 0)
-                t = np.where(C[:, j], da / (da - db), 0.0)
-                E[:, j] = T[:, a, :2] + (T[:, b, :2] - T[:, a, :2]) * t[:, None]
-        ok = C.sum(axis=1) == 2
-        if not ok.any():
-            return []
-        E, C, dirv = E[ok], C[ok], self.seg_dir[sel][ok]
-        order = np.argsort(~C, axis=1, kind='stable')[:, :2]
-        rows = np.arange(len(E))
-        p0, p1 = E[rows, order[:, 0]].copy(), E[rows, order[:, 1]].copy()
-        flip = ((p1 - p0) * dirv).sum(axis=1) < 0
-        tmp = p0[flip].copy()
-        p0[flip] = p1[flip]
-        p1[flip] = tmp
-        keep = np.hypot(*(p1 - p0).T) > 1e-9
-        loops = chain_segments(p0[keep], p1[keep])
+        loops = section_loops(self.T[sel], self.seg_dir[sel], z)
         if self.clip is not None:
             a, b, r, z0, base = self.clip
             c = base - r * (z + z0)
@@ -330,6 +304,7 @@ class Slicer:
         s, g = self.s, self.grid
         z, h = self.layers_z[i]
         w = s['line_width'] * (s['first_layer_width_pct'] / 100.0 if i == 0 else 1.0)
+        a0 = wall_offset(s, w)              # distance of the outer wall's middle from the surface
         layer = Layer(i, z, h, w)
         mask = self.mask(i)
         if mask is None or not mask.any():
@@ -343,14 +318,16 @@ class Slicer:
         if i == 0 and s['brim_loops'] > 0 and s.get('raft_type', 'none') == 'none':   # with a raft: no brim
             dout = cv2.distanceTransform(1 - mask, cv2.DIST_L2, cv2.DIST_MASK_PRECISE) * res
             for k in reversed(range(s['brim_loops'])):
-                for loop in self.contours(dout <= (w / 2 + k * w), g.origin, min_area, external=True, offset=(i, w / 2 + k * w)):
+                for loop in self.contours(dout <= (w - a0 + k * w), g.origin, min_area, external=True, offset=(i, w - a0 + k * w)):
                     layer.brim.append(Path(KIND_BRIM, loop, True))
 
         if spiral:
-            loops = self.contours(dist > w / 2, g.origin, min_area, external=True, offset=(i, w / 2))
+            loops = self.contours(dist > a0, g.origin, min_area, external=True, offset=(i, a0))
             if not loops:
                 return layer
             loop = max(loops, key=lambda l: abs(signed_area(l)))
+            if s.get('wall_direction', 'ccw') == 'cw':    # the spiral keeps one direction (alternate: counter-clockwise)
+                loop = loop[::-1].copy()
             if len(loops) > 1:
                 self._warn_once('spiral', 'Spiral vase uses only the largest outline; other islands are skipped.')
             target = prev_spiral_end if prev_spiral_end is not None else loop[np.argmax(loop[:, 1])]
@@ -377,7 +354,7 @@ class Slicer:
         solid_all = mask & (1 - cover)
         n_lab, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
         overlap = s['infill_overlap'] / 100.0
-        infill_d = (nwalls * w + w / 2 - overlap * w) if nwalls > 0 else w / 2
+        infill_d = (a0 + nwalls * w - overlap * w) if nwalls > 0 else a0
         density = s['infill_density'] / 100.0
         angle = s['infill_angle'] + (90.0 if i % 2 else 0.0)
         thin = 0
@@ -391,7 +368,7 @@ class Slicer:
             stages = []
             walls = []
             for k in range(nwalls):
-                loops = self.contours(d > w / 2 + k * w, origin, min_area, offset=(i, w / 2 + k * w))
+                loops = self.contours(d > a0 + k * w, origin, min_area, offset=(i, a0 + k * w))
                 if not loops:
                     break
                 walls.append([Path(KIND_OUTER if k == 0 else KIND_INNER, l, True) for l in loops])
@@ -451,6 +428,49 @@ class Slicer:
             self.progress('slicing', (i + 1) / max(n, 1))
         smooth_spiral(layers, self.s['line_width'])
         return SliceResult(layers, self.grid.res, self.warnings)
+
+
+def wall_offset(s, w):
+    """How far inside the surface the middle of the outer wall runs: half a bead (the bead lies inside the part) or
+    nothing (centered: half the bead outside)."""
+    return 0.0 if s.get('wall_placement', 'inside') == 'centered' else w / 2
+
+
+def section_loops(T, seg_dir, z):
+    """Oriented closed loops where the triangles T (m, 3, 3) cross the plane at height z; seg_dir (m, 2): the direction
+    of each triangle's cut with material on its left (z x normal)."""
+    if len(T) == 0:
+        return []
+    d = T[:, :, 2] - z
+    d[d == 0] = 1e-9
+    m = len(T)
+    E = np.empty((m, 3, 2))
+    C = np.empty((m, 3), dtype=bool)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        for j, (a, b) in enumerate(((0, 1), (1, 2), (2, 0))):
+            da, db = d[:, a], d[:, b]
+            C[:, j] = (da > 0) != (db > 0)
+            t = np.where(C[:, j], da / (da - db), 0.0)
+            E[:, j] = T[:, a, :2] + (T[:, b, :2] - T[:, a, :2]) * t[:, None]
+    ok = C.sum(axis=1) == 2
+    if not ok.any():
+        return []
+    E, C, dirv = E[ok], C[ok], seg_dir[ok]
+    order = np.argsort(~C, axis=1, kind='stable')[:, :2]
+    rows = np.arange(len(E))
+    p0, p1 = E[rows, order[:, 0]].copy(), E[rows, order[:, 1]].copy()
+    flip = ((p1 - p0) * dirv).sum(axis=1) < 0
+    tmp = p0[flip].copy()
+    p0[flip] = p1[flip]
+    p1[flip] = tmp
+    keep = np.hypot(*(p1 - p0).T) > 1e-9
+    return chain_segments(p0[keep], p1[keep])
+
+
+def seg_directions(T):
+    """z x normal of each triangle (m, 2): see section_loops."""
+    n = np.cross(T[:, 1] - T[:, 0], T[:, 2] - T[:, 0])
+    return np.stack([-n[:, 1], n[:, 0]], axis=1)
 
 
 def smooth_spiral(layers, w):

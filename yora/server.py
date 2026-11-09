@@ -165,6 +165,8 @@ def preview_buffer(tp, which):
     lh = np.diff(np.concatenate([[0.0], lz])) if len(lz) else np.zeros(1)
     lh[lh <= 0] = lz[0] if len(lz) and lz[0] > 0 else 1.0
     a[:, 11] = lh[np.clip(tp.layer[idx], 0, len(lh) - 1)] if len(idx) else 0.0
+    if getattr(tp, 'thick', None) is not None and len(idx):   # curved layers: each bead's own thickness
+        a[:, 11] = tp.thick[idx]
     a[:, 12] = idx
     return a.tobytes()
 
@@ -380,6 +382,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json(STATE.changed(s))
             if url.path == '/api/object/fill':
                 return self.post_object_fill()
+            if url.path == '/api/curve':
+                return self.post_curve()
+            if url.path == '/api/curve/from':
+                return self.post_curve_from()
             if url.path in ('/api/object/delete', '/api/object/duplicate', '/api/object/clear'):
                 return self.post_object_action(url.path.rsplit('/', 1)[1])
             if url.path == '/api/project/save':
@@ -576,6 +582,51 @@ class Handler(BaseHTTPRequestHandler):
             pid = int(b['id']) if b.get('id') is not None else STATE.plate.parts[0]['id']
             STATE.plate.update(pid, transform, s)
             return self.send_json(STATE.changed(s))
+
+    def post_curve(self):
+        """Curve strategy: the curve (given, or found from the part) and some of its layer planes, to draw in Prepare."""
+        from . import curve
+        s = settings.normalize(self.json_body().get('settings'))
+        with STATE.lock:
+            if not STATE.plate:
+                return self.fail('Add a part first')
+            STATE.place(s)
+            tris = STATE.model
+        return self.send_json(curve.preview(tris, s))
+
+    def post_curve_from(self):
+        """Curve points from another source. Body: {source: 'edge', id, point} (the run of sharp edges, or STEP face
+        borders, of a part through the clicked point), {source: 'line', points} (a line drawn on the part) or
+        {source: 'part', id} (another part's middle line). Returns {points}."""
+        from . import curve
+        b = self.json_body()
+        s = settings.normalize(b.get('settings'))
+        src = b.get('source')
+        if src == 'edges':                  # every edge that can be picked, to show them while picking
+            with STATE.lock:
+                STATE.place(s)
+                out = []
+                for p in STATE.plate.parts:
+                    Vu, se = curve.sharp_edges(p['placed'], p.get('cad_faces'))
+                    out.append({'id': p['id'], 'segs': np.round(Vu[se].reshape(-1), 2).tolist()})
+            return self.send_json({'parts': out})
+        if src == 'line':
+            P = np.array([p[:3] for p in b.get('points') or []], dtype=float)
+            if len(P) < 2:
+                return self.fail('Draw a longer line')
+            return self.send_json({'points': np.round(curve.simplify_points(curve.bottom_up(P)), 2).tolist()})
+        with STATE.lock:
+            STATE.place(s)
+            p = STATE.plate.find(int(b['id']))
+            tris, cad = p['placed'], p.get('cad_faces')
+        if src == 'edge':
+            P = curve.edge_chain(tris, b['point'], cad, float(b.get('angle', 30)))
+            if P is None or len(P) < 2:
+                return self.fail('No edge where you clicked. Click right on an edge of the part, or draw a line on it instead.')
+            return self.send_json({'points': np.round(curve.simplify_points(P), 2).tolist(), 'dense': len(P)})
+        if src == 'part':
+            return self.send_json({'points': np.round(curve.from_part(tris, s), 2).tolist()})
+        return self.fail('Unknown curve source')
 
     def post_object_fill(self):
         """Fill tool: the triangles picked by a click (Plate.pick). Body: {id, tri, angle, spread}. Returns

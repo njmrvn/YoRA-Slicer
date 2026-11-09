@@ -26,9 +26,10 @@ def slice_to_toolpath(tris, settings, progress=None, cache=None, parts=None):
     parts: [(part id, triangle count)] in the order of tris, to find the surfaces picked for the surface pattern
     (pattern_faces); None = one part with id 1."""
     from .strategy import is_angled, slice_angled
+    from .curve import is_curve, slice_curve
     from .overhang import annotate
-    if is_angled(settings):
-        tp = slice_angled(tris, settings, progress)
+    if is_angled(settings) or is_curve(settings):
+        tp = (slice_curve if is_curve(settings) else slice_angled)(tris, settings, progress)
         if progress:
             progress('planning', 1.0)
         return annotate(tp, settings)
