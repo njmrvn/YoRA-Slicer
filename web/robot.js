@@ -603,7 +603,7 @@ export function initRobot(ctx) {
       delete toolCache[res.name];
       setValue('tool_model', res.name);
       await buildPanel();
-      $('rbToolInfo').textContent = `${res.name}: ${res.triangles.toLocaleString()} triangles, ${res.size.map((v) => fmt(v, 0)).join(' × ')}`;
+      $('rbToolInfo').textContent = `${res.name}: ${res.triangles.toLocaleString('en-US')} triangles, ${res.size.map((v) => fmt(v, 0)).join(' × ')}`;
       toast(res.hint || 'Tool model imported. Place it on the flange if needed, then click "Set TCP at nozzle tip".', res.hint ? 'warn' : 'info', 9000);
     } catch (e) { toast('Tool import failed: ' + e.message, 'error', 10000); }
   }
@@ -908,7 +908,7 @@ Bed frame X, Y, Z: ${f(old)}  →  ${f(neu)} mm
     if (!sm) { box.innerHTML = '<div class="muted small">Run the check to solve the robot joints for every move, then play the simulation.</div>'; $('playBar').hidden = true; return; }
     const pct = Math.round(sm.valid_ratio * 1000) / 10;
     $('rbStatus').innerHTML = sm.ok ? '<span class="badge ok">✓ Robot can print this job</span>'
-      : `<span class="badge bad">${sm.issues_total.toLocaleString()} moves with problems (${pct}% valid)</span>`;
+      : `<span class="badge bad">${sm.issues_total.toLocaleString('en-US')} moves with problems (${pct}% valid)</span>`;
     const cfg = sm.config;
     const rows = [
       ['Configuration', `${cfg.rear ? 'Rear' : 'Front'} · elbow ${cfg.lower_elbow ? 'down' : 'up'} · wrist ${cfg.wrist_flip ? 'flip' : 'no flip'}${sm.locked ? ' (locked)' : ''}`],
@@ -990,7 +990,7 @@ Bed frame X, Y, Z: ${f(old)}  →  ${f(neu)} mm
     for (let i = 0; i < tr.move.length && tr.move[i] <= move; i++) li = i;
     const layer = tr.layer[li] ?? 0;
     const names = Object.entries(ERR).filter(([b]) => bits & Number(b)).map(([, n]) => n);
-    $('playLabel').innerHTML = `${clock(R.t)} / ${clock(R.simT)} · layer ${layer + 1} · move ${move.toLocaleString()}` +
+    $('playLabel').innerHTML = `${clock(R.t)} / ${clock(R.simT)} · layer ${layer + 1} · move ${move.toLocaleString('en-US')}` +
       (names.length ? ` · <span class="bad">${names.join(', ')}</span>` : '');
     // Toolpath grows behind the nozzle: everything up to the move the robot has reached (interpolated between samples)
     const moveNow = Math.floor(move + a * ((R.sim[k1 * 9 + 8] | 0) - move));

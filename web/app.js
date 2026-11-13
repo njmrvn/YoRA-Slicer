@@ -102,7 +102,10 @@ async function api(path, opts = {}) {
 }
 const postJSON = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const fmtTime = (s) => { const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60); return h ? `${h} h ${m} min` : `${m} min`; };
-const fmt = (v, d = 1) => Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
+// numbers are shown with the digits 0-9 whatever the Windows language (the page is in English, and a number copied
+// from a label must go into a number box); NUM: never put fmt() output into an <input>, it may hold commas
+const fmt = (v, d = 1) => Number(v).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+const NUM = (v, d = 1) => String(Math.round(Number(v) * 10 ** d) / 10 ** d);   // a plain number for an input box
 
 // ------------------------------------------------------------------ 3D view
 const view = {};
@@ -501,7 +504,7 @@ async function openFile(file) {
       setMode('prepare');
       if (first) setView('iso');
       const added = res.model.parts.find((p) => p.id === res.added);
-      setStatusNote(`${file.name}: ${added.triangles.toLocaleString()} triangles` + (added.cad_faces ? `, ${added.cad_faces.toLocaleString()} CAD faces` : '') +
+      setStatusNote(`${file.name}: ${added.triangles.toLocaleString('en-US')} triangles` + (added.cad_faces ? `, ${added.cad_faces.toLocaleString('en-US')} CAD faces` : '') +
         (res.model.parts.length > 1 ? `, added as part ${res.model.parts.length}.` : '. Set the print settings, then Slice.'));
     }
   } catch (e) { toast(e.message, 'error'); } finally { busy(false); refreshButtons(); }
@@ -1227,8 +1230,8 @@ function updateObjectPanel() {
   const t = part.transform;
   ['sx', 'sy', 'sz'].forEach((id, i) => { $(id).value = t.scale[i]; });
   ['rx', 'ry', 'rz'].forEach((id, i) => { $(id).value = t.rotation[i]; });
-  $('px').value = fmt((part.min[0] + part.max[0]) / 2, 1).replace(/,/g, '');
-  $('py').value = fmt((part.min[1] + part.max[1]) / 2, 1).replace(/,/g, '');
+  $('px').value = NUM((part.min[0] + part.max[0]) / 2);
+  $('py').value = NUM((part.min[1] + part.max[1]) / 2);
 }
 function selectPart(id) {
   if (id === app.selected || !view.parts?.[id]) return;
@@ -1254,6 +1257,11 @@ function onTransformInput(e) {
   clearTimeout(transformTimer);
   transformTimer = setTimeout(() => applyTransform(true), 350);
 }
+// the selected part's position (middle of its box on the bed): the Position boxes, or where it is if a box is empty
+function partCentre(part = selectedPart()) {
+  const here = part ? [(part.min[0] + part.max[0]) / 2, (part.min[1] + part.max[1]) / 2] : [0, 0];
+  return ['px', 'py'].map((id, i) => { const v = String($(id).value).trim(); return v !== '' && Number.isFinite(Number(v)) ? Number(v) : here[i]; });
+}
 async function applyTransform(useInputs = false, recenter = false) {
   const part = selectedPart();
   if (!part) return;
@@ -1266,7 +1274,7 @@ async function applyTransform(useInputs = false, recenter = false) {
     transform: useInputs ? {
       scale: ['sx', 'sy', 'sz'].map((id) => Number($(id).value) || 100),
       rotation: ['rx', 'ry', 'rz'].map((id) => Number($(id).value) || 0),
-      center: recenter ? null : [Number($('px').value), Number($('py').value)],
+      center: recenter ? null : partCentre(part),
     } : { ...t, center: recenter ? null : t.center },
   };
   try {
@@ -1642,7 +1650,7 @@ function buildPoints(a, b) {
   view.ptsObj.renderOrder = 2;
   view.ptsObj.userData = { a, upto };
   view.scene.add(view.ptsObj);
-  $('pointsCount').textContent = n.toLocaleString();
+  $('pointsCount').textContent = n.toLocaleString('en-US');
 }
 // first point of every outer wall loop of segments a..b-1 (where the loop starts = the seam)
 function buildSeamMarks(a, b) {
@@ -1814,7 +1822,7 @@ function renderStats() {
     ['Material', `${fmt(st.mass_g / 1000, 2)} kg · ${fmt(st.volume_cm3, 0)} cm³`],
     ['Peak flow', `${fmt(st.max_volumetric_mm3s, 0)} mm³/s (${fmt(st.max_volumetric_mm3s * 3.6 * app.values.density / 1000, 2)} kg/h)`],
     ['Flow level changes', `~${st.io_switches_est}`],
-    ['Moves', st.moves.toLocaleString()],
+    ['Moves', st.moves.toLocaleString('en-US')],
     ['Layer time', `${fmt(st.layer_time_min / 60, 1)}–${fmt(st.layer_time_max / 60, 1)} min`],
   ];
   const bar = $('statusbar');
@@ -1825,7 +1833,7 @@ function renderStats() {
   const card = (k, v, sub = '', wide = false) => `<div class="stat${wide ? ' wide' : ''}"><div class="k">${k}</div><div class="v">${v}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
   $('summaryGrid').innerHTML = card('Print time', fmtTime(st.time_s), `layers ${fmt(st.layer_time_min / 60, 1)}–${fmt(st.layer_time_max / 60, 1)} min`) +
     card('Material', `${fmt(st.mass_g / 1000, 2)} kg`, `${fmt(st.volume_cm3, 0)} cm³`) +
-    card('Layers', st.layers.toLocaleString(), `${st.moves.toLocaleString()} moves`) +
+    card('Layers', st.layers.toLocaleString('en-US'), `${st.moves.toLocaleString('en-US')} moves`) +
     card('Path', `${fmt(st.extrude_mm / 1000, 1)} m`, `travel ${fmt((st.travel_mm || 0) / 1000, 1)} m`) +
     card('Peak flow', `${fmt(st.max_volumetric_mm3s, 0)} mm³/s`,
       `${fmt(st.max_volumetric_mm3s * 3.6 * app.values.density / 1000, 2)} kg/h · ~${st.io_switches_est} flow level changes`, true) +
@@ -1861,9 +1869,9 @@ async function exportProgram() {
   try {
     const h = await downloadFrom('/api/export/program', { settings: app.values });
     const info = JSON.parse(h.get('X-Export-Info') || '{}');
-    const size = info.instructions ? `${info.instructions.toLocaleString()} instructions`
-      : info.moves ? `${info.moves.toLocaleString()} moves` + (info.files ? ` · ${info.files.join(', ')}` : '')
-        : `${(info.lines || 0).toLocaleString()} lines`;
+    const size = info.instructions ? `${info.instructions.toLocaleString('en-US')} instructions`
+      : info.moves ? `${info.moves.toLocaleString('en-US')} moves` + (info.files ? ` · ${info.files.join(', ')}` : '')
+        : `${(info.lines || 0).toLocaleString('en-US')} lines`;
     toast(`${post}: saved ${h.get('X-Saved-Path')}\n${size}`, 'info', 10000);
     addHistory(post, h.get('X-Saved-Path'), size);
     if (info.robot_checked === false && info.language !== 'gcode') {
@@ -1887,7 +1895,7 @@ function addHistory(post, path, size) {
 async function previewCode() {
   try {
     const res = await (await postJSON('/api/post/preview', { settings: app.values, lines: 400 })).json();
-    $('codeTitle').textContent = `${app.values.post_name || 'Borunte .act'} · ${res.info.file_in_zip || res.info.file} · first ${res.lines.length} of ${res.total_lines.toLocaleString()} lines`;
+    $('codeTitle').textContent = `${app.values.post_name || 'Borunte .act'} · ${res.info.file_in_zip || res.info.file} · first ${res.lines.length} of ${res.total_lines.toLocaleString('en-US')} lines`;
     $('codeText').textContent = res.lines.join('\n');
     $('codePanel').hidden = false;
   } catch (e) { toast('Preview failed: ' + e.message, 'error', 8000); }
@@ -2085,7 +2093,7 @@ async function boot() {
     mergeValues: (vals) => { app.history?.mark(); setValues({ ...app.values, ...vals }); } });
   postUI = initPostEditor({ app, $, api, postJSON, toast, persist });
   matUI = initMaterials({ app, $, api, postJSON, toast, setSetting });
-  gizmoUI = initGizmo({ app, view, $, cssColor, setStatusNote, applyTransform, selectPart, busyTool: () => !!seamTool.mode || planeDrag.active || !!patternUI?.painting() });
+  gizmoUI = initGizmo({ app, view, $, cssColor, setStatusNote, applyTransform, selectPart, partCentre, busyTool: () => !!seamTool.mode || planeDrag.active || !!patternUI?.painting() });
   patternUI = initPattern({ app, $, api, toast, setSetting, liveSlice: () => slice({ live: true }), view, palette });
   app.history = initHistory({ app, $, toast, applyState, toolUndo: () => patternUI.undoStroke() });
   $('layerRange').addEventListener('input', () => { app.cut = null; updateLayers(); });

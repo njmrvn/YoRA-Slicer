@@ -162,8 +162,9 @@ export function initGizmo(ctx) {
     try { el.releasePointerCapture(ev.pointerId); } catch (_) { /* released */ }
     if (!d || (!d.delta.lengthSq() && !d.angle)) { resetPreview(); return; }
     if (d.kind === 'move') {
-      $('px').value = Math.round((Number($('px').value) + d.delta.x) * 10) / 10;
-      $('py').value = Math.round((Number($('py').value) + d.delta.y) * 10) / 10;
+      const [cx, cy] = ctx.partCentre();                // never from an empty box (that would be 0, 0)
+      $('px').value = Math.round((cx + d.delta.x) * 10) / 10;
+      $('py').value = Math.round((cy + d.delta.y) * 10) / 10;
     } else {
       // new rotation = turn about the world axis, after the current one; the server applies X, then Y, then Z
       // (fixed axes), i.e. R = Rz Ry Rx = three.js Euler order 'ZYX'

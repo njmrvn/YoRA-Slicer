@@ -41,7 +41,10 @@ async function api(path, opts = {}) {
 }
 const postJSON = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const fmtTime = (s) => { const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60); return h ? `${h} h ${m} min` : `${m} min`; };
-const fmt = (v, d = 1) => Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
+// numbers are shown with the digits 0-9 whatever the Windows language (the page is in English, and a number copied
+// from a label must go into a number box); NUM: never put fmt() output into an <input>, it may hold commas
+const fmt = (v, d = 1) => Number(v).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+const NUM = (v, d = 1) => String(Math.round(Number(v) * 10 ** d) / 10 ** d);   // a plain number for an input box
 function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
 // ------------------------------------------------------------------ 3D view
@@ -280,8 +283,8 @@ function updateObjectPanel() {
   const t = m.transform;
   ['sx', 'sy', 'sz'].forEach((id, i) => { $(id).value = t.scale[i]; });
   ['rx', 'ry', 'rz'].forEach((id, i) => { $(id).value = t.rotation[i]; });
-  $('px').value = fmt((m.min[0] + m.max[0]) / 2, 1).replace(/,/g, '');
-  $('py').value = fmt((m.min[1] + m.max[1]) / 2, 1).replace(/,/g, '');
+  $('px').value = NUM((m.min[0] + m.max[0]) / 2);
+  $('py').value = NUM((m.min[1] + m.max[1]) / 2);
 }
 let transformTimer = null;
 function onTransformInput(e) {
