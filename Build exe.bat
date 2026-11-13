@@ -19,7 +19,7 @@ echo Building, this takes a few minutes ...
 "%BUILD_PY%" -m PyInstaller --noconfirm --clean --windowed --onedir --name "YoRA Slicer" ^
   --distpath "%USERPROFILE%\.yora\dist" --workpath "%BUILD%\work" --specpath "%BUILD%" ^
   --collect-submodules yora --exclude-module tkinter ^
-  --add-data "%~dp0web;web" --add-data "%~dp0samples;samples" --add-data "%~dp0posts;posts" --add-data "%~dp0LICENSE;." ^
+  --add-data "%~dp0web;web" --add-data "%~dp0samples;samples" --add-data "%~dp0posts\*.py;posts" --add-data "%~dp0LICENSE;." ^
   yora_slicer.py || goto failed
 echo.
 echo Done: %USERPROFILE%\.yora\dist\YoRA Slicer\YoRA Slicer.exe
