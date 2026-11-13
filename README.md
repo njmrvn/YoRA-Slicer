@@ -128,6 +128,12 @@ After updating YoRA, close its window and start `YoRA Slicer.bat` again.
 
 It opens in its own Edge or Chrome window and stops when you close that window. It works offline. Your materials, posts, robots and tools are kept in `%USERPROFILE%\.yora\profiles`, not in the program folder, so they are not part of the zip. Windows may warn about a new unsigned program the first time.
 
+### Build the installer
+
+`Build setup.bat` builds the program folder and packs it into one installer, `%USERPROFILE%\.yora\dist\YoRA-Slicer-Setup-<version>.exe` (about 50 MB), with [Inno Setup 6](https://jrsoftware.org/isinfo.php) (install it once: `winget install JRSoftware.InnoSetup`). The script is `installer\YoRA Slicer.iss`; the version comes from `yora/__init__.py`.
+
+The installer needs no admin rights (it installs for the current user, or for everyone if chosen), adds a Start menu entry and an optional desktop shortcut, shows the license, and uninstalls from Windows Settings → Apps. A newer setup updates the installed version. The user's own files in `%USERPROFILE%\.yora` are never touched. It is not signed, so Windows shows "Windows protected your PC" the first time: **More info → Run anyway**.
+
 ## Safety and liability
 
 YoRA Slicer is beta software, and it writes programs that move industrial robots. A robot can cause serious injury and damage.
