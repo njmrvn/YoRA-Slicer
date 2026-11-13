@@ -128,8 +128,22 @@ After updating YoRA, close its window and start `YoRA Slicer.bat` again.
 
 It opens in its own Edge or Chrome window and stops when you close that window. It works offline. Your materials, posts, robots and tools are kept in `%USERPROFILE%\.yora\profiles`, not in the program folder, so they are not part of the zip. Windows may warn about a new unsigned program the first time.
 
+## Safety and liability
+
+YoRA Slicer is beta software, and it writes programs that move industrial robots. A robot can cause serious injury and damage.
+
+- Check every program before you run it. Watch the simulation in YoRA first, then run it on the robot at reduced speed (T1 on KUKA, or your controller's manual reduced-speed mode) with your hand on the enabling switch and the emergency stop, and with nobody inside the cell.
+- The robot check is only a model of your robot. It does not know your real cell (fences, hoses, cables, fixtures), and on curved layers it does not check collisions with the printed part.
+- Not yet tested on a real robot: setting A, B, C by hand, KUKA `C_VEL` blending, and curved layers.
+
+**You use YoRA Slicer and the programs it makes entirely at your own risk.** The authors accept no responsibility or liability for any injury, damage or loss that comes from using it. The software is provided "as is", without any warranty; see the license.
+
 ## License
 
-GNU AGPL-3.0-or-later, see [LICENSE](LICENSE).
+Copyright (C) 2026 njmrvn
+
+YoRA Slicer is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version (AGPL-3.0-or-later, the license PrusaSlicer uses). It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full text.
+
+In short: anyone may use YoRA Slicer for free, at home or at work. Anyone who shares a changed version, or offers one over a network, must publish its full source code under the same license.
 
 STEP files are read with [occt-import-js](https://github.com/kovacsv/occt-import-js) and [Open CASCADE](https://dev.opencascade.org/), both under the LGPL 2.1. They are unchanged in `web/vendor/occt`, with their license texts.
