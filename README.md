@@ -2,8 +2,8 @@
 
 A slicer for large-format 3D printing with an industrial robot arm and a pellet extruder.
 
-<img width="2555" height="1406" alt="image" src="https://github.com/user-attachments/assets/f5611b4c-29a4-4562-8899-1447d60a6b63" />
-<img width="2550" height="1405" alt="image" src="https://github.com/user-attachments/assets/990cc2f3-4fd7-4411-9993-5bfbec0bcb4c" />
+<img src="docs/robot-check.png" width="2555" height="1406" alt="Robot check: a KUKA robot printing a vase, with the joint graphs and the result of the check">
+<img src="docs/robot-jog.png" width="2550" height="1405" alt="Jogging the robot by its joints, with the tool position shown">
 
 ## How it works
 
